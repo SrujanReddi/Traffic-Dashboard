@@ -115,7 +115,7 @@ export default function App() {
         signal_maint_annual: signalMaintAnnual,
         construction_cost: constructionCost
       };
-      const res = await axios.post('http://127.0.0.1:8000/analyze', payload);
+      const res = await axios.post('https://traffic-dashboard-pqlh.onrender.com/analyze', payload);
       setResult(res.data);
       
       // Auto scroll to top of results
