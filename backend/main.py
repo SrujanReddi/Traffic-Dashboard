@@ -75,7 +75,7 @@ def run_economic_analysis(
     params: Dict,
     webster_results: Dict
 ):
-    years = 100
+    years = 30
     r_d = params["discount_rate"] / 100
     r_g = params["traffic_growth"] / 100
     r_inf = params["inflation_rate"] / 100
@@ -189,7 +189,7 @@ def run_economic_analysis(
             rate = new_rate
         return None
     irr = calculate_irr(differential_cashflows)
-    pv_savings = sum(np.array(differential_cashflows[1:]) / (1 + r_d)**np.arange(1, 101))
+    pv_savings = sum(np.array(differential_cashflows[1:]) / (1 + r_d)**np.arange(1, 31))
     pi = pv_savings / abs(gs_cap_0) if gs_cap_0 != 0 else 0
     return {
         "npv_s": npv_s,
@@ -317,7 +317,7 @@ def analyze(data: dict):
             reason = "Intersection is beyond capacity (Y ≥ 0.95). Signal cannot handle flow regardless of economics."
         elif economic["delta_npv"] > 0:
             decision = "🏗️ Grade Separation"
-            reason = "Positive Incremental NPV implies total societal benefits over 100 years exceed construction and maintenance costs."
+            reason = "Positive Incremental NPV implies total societal benefits over 30 years exceed construction and maintenance costs."
         
         status = "Conditionally Recommended"
         if webster["is_saturated"]:
@@ -327,12 +327,12 @@ def analyze(data: dict):
         elif economic["delta_npv"] < 0 and scenarios["optimistic"] < 0:
             status = "Strongly Disrecommended"
         # Payback statement addition per rules
-        if economic["discounted_payback_years"] is not None and economic["discounted_payback_years"] > 60:
-             status = "Financially Marginal (>60yr payback)"
+        if economic["discounted_payback_years"] is not None and economic["discounted_payback_years"] > 20:
+             status = "Financially Marginal (>20yr payback)"
              if webster["is_saturated"]:
                  status = "Mandatory (Financially Marginal)"
         # Chart Sampling
-        chart_years = list(range(0, 101, 5))
+        chart_years = list(range(0, 31, 1))
         comps = economic["comps"]
         chart_data = {
             "years": chart_years,
@@ -354,7 +354,16 @@ def analyze(data: dict):
             ],
             "sensitivities": sensitivities,
             "breakeven_cost": breakeven_c,
-            "scenarios": scenarios
+            "scenarios": scenarios,
+            "spider_data": [
+                {
+                    "variable": s["variable"],
+                    "upside": round(abs(s["high_npv"] - economic["delta_npv"]) / max(max(s2["spread"] for s2 in sensitivities), 1) * 100, 1),
+                    "downside": round(abs(s["low_npv"] - economic["delta_npv"]) / max(max(s2["spread"] for s2 in sensitivities), 1) * 100, 1),
+                    "spread_pct": round(s["spread"] / max(max(s2["spread"] for s2 in sensitivities), 1) * 100, 1),
+                }
+                for s in sensitivities
+            ]
         }
         return {
             "webster": webster,
