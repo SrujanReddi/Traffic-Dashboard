@@ -1,877 +1,906 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import axios from 'axios';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, ReferenceLine, ComposedChart, Line } from 'recharts';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, Legend, ReferenceLine, ComposedChart, Line,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+} from 'recharts';
 
-// Polished "Pro" Theme
+/* ─── Theme ─────────────────────────────────────────────────────────────────── */
 const T = {
-  bg: "#09090b", // deep black/zinc
-  card: "rgba(24, 24, 27, 0.7)", // zinc-900 glass
-  cardSolid: "#18181b",
-  border: "rgba(63, 63, 70, 0.4)",
-  borderFocus: "rgba(161, 161, 170, 0.8)",
-  text: "#fafafa",
-  textSoft: "#a1a1aa", // zinc-400
-  textMuted: "#71717a", // zinc-500
-  green: "#10b981", // emerald
-  greenGlow: "rgba(16, 185, 129, 0.15)",
-  red: "#f43f5e",   // rose
-  redGlow: "rgba(244, 63, 94, 0.15)",
-  cyan: "#06b6d4",
-  amber: "#f59e0b",
-  accent: "#8b5cf6", // violet
-  accentGlow: "rgba(139, 92, 246, 0.2)",
+  bg: '#07070a',
+  sidebar: '#0d0d12',
+  card: 'rgba(18,18,24,0.8)',
+  border: 'rgba(255,255,255,0.07)',
+  text: '#f0f0f2',
+  textSoft: '#9898a6',
+  textMuted: '#4a4a58',
+  green: '#10b981',
+  red: '#f43f5e',
+  cyan: '#22d3ee',
+  amber: '#fbbf24',
+  violet: '#a78bfa',
   mono: "'JetBrains Mono', monospace",
-  chartColors: ["#8b5cf6", "#f43f5e", "#f59e0b", "#64748b"]
+  chart: ['#a78bfa', '#f43f5e', '#fbbf24', '#64748b'],
 };
 
-const fmtCr = (n) => `₹${n ? (n / 10000000).toFixed(2) : 0} Cr`;
-const fmtRatio = (n) => typeof n === 'number' ? n.toFixed(2) : n;
+const fmtCr = (n) => n == null ? '—' : `₹${(n / 1e7).toFixed(2)} Cr`;
+const fmt2 = (n) => typeof n === 'number' ? n.toFixed(2) : '—';
 
-function CustomTooltip({ active, payload, label }) {
-  if (active && payload && payload.length) {
-    return (
-      <div className="custom-tooltip">
-        <p className="tooltip-title">YEAR {label}</p>
-        <div className="tooltip-divider" />
-        {payload.map((entry, index) => (
-          <div key={`item-${index}`} className="tooltip-item">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: entry.color }} />
-              <span style={{ color: T.textSoft }}>{entry.name}</span>
-            </div>
-            <span className="tooltip-value">{typeof entry.value === 'number' ? `${entry.value.toFixed(2)}` : entry.value}</span>
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return null;
+/* ─── Atomic Components ─────────────────────────────────────────────────────── */
+function Tag({ children, color = T.violet, small }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: small ? '2px 8px' : '4px 12px',
+      borderRadius: '100px', border: `1px solid ${color}55`,
+      fontSize: small ? '9px' : '10px', fontWeight: 700,
+      letterSpacing: '1px', color,
+      background: `${color}12`, textTransform: 'uppercase', whiteSpace: 'nowrap',
+    }}>{children}</span>
+  );
 }
 
-export default function App() {
-  // Traffic Inputs
-  const [numPhases, setNumPhases] = useState(4);
-  const [phaseData, setPhaseData] = useState(Array.from({ length: 4 }, () => ({ criticalVolume: 500, lanes: 1 })));
-  const [totalVolume, setTotalVolume] = useState(5000);
-  const [occupancy, setOccupancy] = useState(1.8);
+function Card({ children, style, glow }) {
+  const gc = glow === 'green' ? T.green : glow === 'red' ? T.red : glow === 'violet' ? T.violet : null;
+  return (
+    <div style={{
+      background: T.card,
+      border: `1px solid ${gc ? gc + '40' : T.border}`,
+      borderRadius: '16px',
+      backdropFilter: 'blur(12px)',
+      boxShadow: gc ? `0 0 36px -8px ${gc}25, 0 4px 16px rgba(0,0,0,0.3)` : '0 2px 12px rgba(0,0,0,0.25)',
+      overflow: 'hidden',
+      ...style,
+    }}>{children}</div>
+  );
+}
 
-  // Economic Inputs
+function KpiCell({ label, value, color }) {
+  return (
+    <div style={{ padding: '12px 18px', borderRight: `1px solid ${T.border}`, flexShrink: 0. }}>
+      <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '1.2px', color: T.textSoft, marginBottom: '3px', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: '18px', fontWeight: 800, color: color || T.text, fontFamily: T.mono, lineHeight: 1 }}>{value}</div>
+    </div>
+  );
+}
+
+function SectionLabel({ num, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+      <div style={{
+        width: '26px', height: '26px', borderRadius: '7px',
+        background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.3)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '11px', fontWeight: 800, color: T.violet, fontFamily: T.mono, flexShrink: 0,
+      }}>{num}</div>
+      <div style={{ fontSize: '11px', fontWeight: 800, color: T.textSoft, letterSpacing: '2.5px', textTransform: 'uppercase' }}>{children}</div>
+      <div style={{ flex: 1, height: '1px', background: T.border }} />
+    </div>
+  );
+}
+
+function MetricCard({ label, value, unit, color, sub, icon }) {
+  return (
+    <Card style={{ padding: '20px', position: 'relative', overflow: 'hidden' }}>
+      {color && <div style={{ position: 'absolute', top: 0, right: 0, width: '100px', height: '100px', background: `radial-gradient(circle, ${color}18 0%, transparent 70%)`, pointerEvents: 'none' }} />}
+      <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '1.5px', color: T.textMuted, textTransform: 'uppercase', marginBottom: '14px' }}>
+        {icon && <span style={{ marginRight: '6px' }}>{icon}</span>}{label}
+      </div>
+      <div style={{ fontFamily: T.mono, fontWeight: 900, lineHeight: 1, letterSpacing: '-1px' }}>
+        <span style={{ fontSize: '40px', color: color || T.text }}>{value}</span>
+        {unit && <span style={{ fontSize: '16px', color: T.textMuted, marginLeft: '4px' }}>{unit}</span>}
+      </div>
+      {sub && <div style={{ fontSize: '12px', color: T.textSoft, marginTop: '10px', lineHeight: 1.5 }}>{sub}</div>}
+    </Card>
+  );
+}
+
+function ProgressBar({ pct, color = T.violet, h = 8 }) {
+  return (
+    <div style={{ height: h, background: 'rgba(0,0,0,0.4)', borderRadius: h, overflow: 'hidden', border: `1px solid ${T.border}` }}>
+      <div style={{
+        height: '100%', width: `${Math.min(100, Math.max(0, pct))}%`,
+        background: `linear-gradient(90deg, ${color}80, ${color})`,
+        borderRadius: h, transition: 'width 1.2s cubic-bezier(0.16,1,0.3,1)',
+        boxShadow: `0 0 10px ${color}50`,
+      }} />
+    </div>
+  );
+}
+
+function ChartShell({ title, sub, children, span }) {
+  return (
+    <Card style={{ padding: '20px', gridColumn: span ? '1/-1' : undefined }}>
+      <div style={{ fontSize: '16px', fontWeight: 700, color: T.text, marginBottom: sub ? '6px' : '24px' }}>{title}</div>
+      {sub && <div style={{ fontSize: '12px', color: T.textMuted, marginBottom: '24px', lineHeight: 1.6 }}>{sub}</div>}
+      {children}
+    </Card>
+  );
+}
+
+function CustomTooltip({ active, payload, label, valueFormatter }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: 'rgba(7,7,10,0.97)', border: `1px solid ${T.border}`,
+      borderRadius: '12px', padding: '12px 16px',
+      boxShadow: '0 16px 48px rgba(0,0,0,0.7)', minWidth: '160px',
+    }}>
+      <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '1px', color: T.textMuted, marginBottom: '8px' }}>YEAR {label}</div>
+      <div style={{ height: '1px', background: T.border, marginBottom: '8px' }} />
+      {payload.map((e, i) => (
+        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', fontSize: '12px', marginBottom: '4px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: e.color, flexShrink: 0 }} />
+            <span style={{ color: T.textSoft }}>{e.name}</span>
+          </div>
+          <span style={{ fontFamily: T.mono, fontWeight: 700, color: T.text, fontSize: '12px' }}>
+            {typeof e.value === 'number'
+              ? (valueFormatter ? valueFormatter(e.value) : e.value.toFixed(2))
+              : e.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Chart axis shorthands ─────────────────────────────────────────────────── */
+const axX = { tick: { fill: T.textMuted, fontSize: 10, fontFamily: T.mono }, axisLine: false, tickLine: false, dy: 8 };
+const axY = (fmt) => ({ tick: { fill: T.textMuted, fontSize: 10, fontFamily: T.mono }, axisLine: false, tickLine: false, width: 72, tickFormatter: fmt });
+
+/* ─── Label helpers ─────────────────────────────────────────────────────────── */
+function InputLabel({ children }) {
+  return <label style={{ fontSize: '12px', fontWeight: 600, color: T.textMuted, textTransform: 'uppercase', letterSpacing: '0.8px', display: 'block', marginBottom: '6px' }}>{children}</label>;
+}
+function InputField({ value, onChange, step }) {
+  return (
+    <input type="number" step={step} value={value}
+      onChange={e => onChange(Number(e.target.value))}
+      style={{
+        width: '100%', background: 'rgba(0,0,0,0.4)', border: `1px solid ${T.border}`,
+        borderRadius: '8px', padding: '10px 12px', color: T.text,
+        fontFamily: T.mono, fontSize: '15px', outline: 'none', transition: 'border-color 0.15s',
+      }}
+      onFocus={e => (e.target.style.borderColor = T.violet)}
+      onBlur={e => (e.target.style.borderColor = T.border)}
+    />
+  );
+}
+function FieldGroup({ label, value, onChange, step, full }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', ...(full ? { gridColumn: '1/-1' } : {}) }}>
+      <InputLabel>{label}</InputLabel>
+      <InputField value={value} onChange={onChange} step={step} />
+    </div>
+  );
+}
+function GroupHead({ children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '20px 0 12px' }}>
+      <div style={{ fontSize: '16px', fontWeight: 700, color: T.textSoft, letterSpacing: '1px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{children}</div>
+      <div style={{ flex: 1, height: '1px', background: T.border }} />
+    </div>
+  );
+}
+
+/* ─── TABS ──────────────────────────────────────────────────────────────────── */
+const TABS = [
+  { id: 'signal', label: 'SIGNAL', icon: '1.' },
+  { id: 'cashflow', label: 'CASH FLOWS', icon: '2.' },
+  { id: 'npv', label: 'NPV', icon: '3.' },
+  { id: 'scenario', label: 'SCENARIOS', icon: '4.' },
+  { id: 'risk', label: 'SENSITIVITY & IRR', icon: '5.' },
+  { id: 'payback', label: 'PAYBACK', icon: '6.' },
+];
+
+/* ─── APP ───────────────────────────────────────────────────────────────────── */
+export default function App() {
+  const [numPhases, setNumPhases] = useState(4);
+  const [phaseData, setPhaseData] = useState(Array.from({ length: 4 }, () => ({ criticalVolume: 500, lanes: 2 })));
+  const [totalVol, setTotalVol] = useState(5000);
+  const [occupancy, setOccupancy] = useState(1.8);
   const [gdp, setGdp] = useState(200000);
   const [population, setPopulation] = useState(5000000);
   const [fuelCost, setFuelCost] = useState(100);
-  const [inflationRate, setInflationRate] = useState(6.0);
-  const [discountRate, setDiscountRate] = useState(10.0);
-  const [trafficGrowth, setTrafficGrowth] = useState(5.0);
+  const [inflation, setInflation] = useState(6.0);
+  const [discount, setDiscount] = useState(10.0);
+  const [trafGrowth, setTrafGrowth] = useState(5.0);
   const [gdpGrowth, setGdpGrowth] = useState(6.0);
-  const [fuelConsumptionIdle, setFuelConsumptionIdle] = useState(0.7);
-  const [vocPerKm, setVocPerKm] = useState(3.0);
-  const [carbonCost, setCarbonCost] = useState(1.5);
-
-  // Cost Inputs
-  const [signalInstallCost, setSignalInstallCost] = useState(500000);
-  const [signalMaintAnnual, setSignalMaintAnnual] = useState(200000);
-  const [constructionCost, setConstructionCost] = useState(50.0); // Cr
+  const [idleFuel, setIdleFuel] = useState(0.7);
+  const [voc, setVoc] = useState(3.0);
+  const [carbon, setCarbon] = useState(1.5);
+  const [sigInstall, setSigInstall] = useState(500000);
+  const [sigMaint, setSigMaint] = useState(200000);
+  const [buildCost, setBuildCost] = useState(50.0);
+  const [gradeMaint, setGradeMaint] = useState(250000);
 
   const [result, setResult] = useState(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [tab, setTab] = useState('signal');
+  const mainRef = useRef(null);
 
-  const mainContentRef = useRef(null);
-
-  const handleNumPhasesChange = (value) => {
-    setNumPhases(value);
-    setPhaseData(Array.from({ length: value }, (_, idx) => ({
-      criticalVolume: phaseData[idx]?.criticalVolume || 500,
-      lanes: phaseData[idx]?.lanes || 1,
+  const changePhases = (v) => {
+    setNumPhases(v);
+    setPhaseData(Array.from({ length: v }, (_, i) => ({
+      criticalVolume: phaseData[i]?.criticalVolume ?? 500,
+      lanes: phaseData[i]?.lanes ?? 2,
     })));
   };
+  const setPhase = (i, f, v) => { const d = [...phaseData]; d[i][f] = v; setPhaseData(d); };
 
-  const handlePhaseChange = (index, field, value) => {
-    const updated = [...phaseData];
-    updated[index][field] = value;
-    setPhaseData(updated);
-  };
-
-  const analyze = async () => {
-    setIsAnalyzing(true);
-    setError(null);
+  const run = async () => {
+    setLoading(true); setError(null);
     try {
-      const payload = {
+      const { data } = await axios.post('https://traffic-dashboard-pqlh.onrender.com/analyze', {
         num_phases: numPhases,
         phases: phaseData.map(p => ({ critical_volume: p.criticalVolume, lanes: p.lanes })),
-        total_volume: totalVolume,
-        occupancy,
-        gdp,
-        population,
-        fuel_cost: fuelCost,
-        inflation_rate: inflationRate,
-        discount_rate: discountRate,
-        traffic_growth: trafficGrowth,
-        gdp_growth: gdpGrowth,
-        fuel_consumption_idle: fuelConsumptionIdle,
-        voc_per_km: vocPerKm,
-        carbon_cost: carbonCost,
-        signal_install_cost: signalInstallCost,
-        signal_maint_annual: signalMaintAnnual,
-        construction_cost: constructionCost
-      };
-      const res = await axios.post('https://traffic-dashboard-pqlh.onrender.com/analyze', payload);
-      setResult(res.data);
-
-      // Auto scroll to top of results
-      setTimeout(() => {
-        if (mainContentRef.current) {
-          mainContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      }, 100);
-    } catch (err) {
-      setError(err.response?.data?.detail || err.message);
-    } finally {
-      setIsAnalyzing(false);
-    }
+        total_volume: totalVol, occupancy, gdp, population,
+        fuel_cost: fuelCost, inflation_rate: inflation, discount_rate: discount,
+        traffic_growth: trafGrowth, gdp_growth: gdpGrowth,
+        fuel_consumption_idle: idleFuel, voc_per_km: voc, carbon_cost: carbon,
+        signal_install_cost: sigInstall, signal_maint_annual: sigMaint, construction_cost: buildCost,
+        grade_sep_maint_annual: gradeMaint,
+      });
+      setResult(data); setTab('signal');
+      setTimeout(() => mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' }), 80);
+    } catch (e) { setError(e.response?.data?.detail ?? e.message); }
+    finally { setLoading(false); }
   };
+
+  const eco = result?.economic;
+  const web = result?.webster;
+  const chrt = result?.charts;
+  const dec = result?.decision;
+  const isGS = eco?.delta_npv > 0 || web?.is_saturated;
+  const hColor = isGS ? T.green : T.amber;
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
-        
-        :root {
-          --bg: ${T.bg};
-          --card: ${T.card};
-          --card-solid: ${T.cardSolid};
-          --border: ${T.border};
-          --border-focus: ${T.borderFocus};
-          --text: ${T.text};
-          --text-soft: ${T.textSoft};
-          --text-muted: ${T.textMuted};
-          --accent: ${T.accent};
-          --accent-glow: ${T.accentGlow};
-          --mono: ${T.mono};
-        }
-
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        
-        body { 
-          background: var(--bg); 
-          color: var(--text); 
-          font-family: 'Inter', system-ui, sans-serif; 
-          -webkit-font-smoothing: antialiased; 
-          overflow: hidden; /* Prevent body scroll, layout handles it */
-          width: 100%;
-        }
-        
-        /* Layout */
-        .app-layout {
-          display: flex;
-          height: 100vh;
-          width: 100%;
-          overflow: hidden;
-        }
-        
-        /* Sidebar */
-        .sidebar {
-          flex: 0 0 400px;
-          height: 100%;
-          display: flex;
-          flex-direction: column;
-          background: rgba(15, 15, 18, 0.95);
-          backdrop-filter: blur(20px);
-          border-right: 1px solid var(--border);
-          position: relative;
-          z-index: 10;
-          box-shadow: 10px 0 30px rgba(0,0,0,0.5);
-        }
-        
-        .sidebar-header {
-          padding: 32px 24px 24px 24px;
-          border-bottom: 1px solid rgba(255,255,255,0.05);
-          background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%);
-        }
-        
-        .sidebar-content {
-          flex: 1;
-          overflow-y: auto;
-          padding: 24px;
-          display: flex;
-          flex-direction: column;
-          gap: 32px;
-        }
-
-        /* Customize Scrollbar */
-        ::-webkit-scrollbar { width: 6px; height: 6px;}
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px;}
-        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
-        
-        .sidebar-footer {
-          padding: 24px;
-          border-top: 1px solid var(--border);
-          background: var(--card-solid);
-        }
-        
-        /* Main Content */
-        .main-content {
-          flex: 1;
-          min-width: 0;
-          overflow-x: hidden;
-          height: 100%;
-          overflow-y: auto;
-          position: relative;
-          background: radial-gradient(circle at 80% 20%, var(--accent-glow) 0%, transparent 50%), var(--bg);
-        }
-        
-        .main-content-inner {
-          width: 100%;
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 64px 48px;
-        }
-        
-        /* Inputs */
-        .section-title {
-          font-size: 11px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 2px;
-          color: var(--text-muted);
-          margin-bottom: 20px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .section-title::after {
-          content: '';
-          height: 1px;
-          flex: 1;
-          background: var(--border);
-        }
-        
-        .input-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 16px;
-        }
-        
-        .input-group { display: flex; flex-direction: column; gap: 6px; }
-        .input-group.full { grid-column: 1 / -1; }
-        
-        .input-label { 
-          font-size: 10px; 
-          font-weight: 600; 
-          text-transform: uppercase; 
-          letter-spacing: 1px; 
-          color: var(--text-soft); 
-        }
-        
-        .input-field { 
-          background: rgba(0,0,0,0.5); 
-          border: 1px solid var(--border); 
-          border-radius: 8px; 
-          padding: 10px 12px; 
-          color: var(--text); 
-          font-family: var(--mono);
-          font-size: 13px; 
-          outline: none; 
-          transition: all 0.2s ease; 
-          width: 100%;
-        }
-        .input-field:focus { 
-          border-color: var(--accent); 
-          box-shadow: 0 0 0 2px var(--accent-glow);
-          background: rgba(0,0,0,0.8);
-        }
-        select.input-field { appearance: none; cursor: pointer; }
-        
-        .run-btn {
-          width: 100%;
-          padding: 16px;
-          background: #fff;
-          color: #000;
-          font-weight: 800;
-          font-size: 14px;
-          letter-spacing: 1px;
-          border-radius: 12px;
-          border: none;
-          cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          box-shadow: 0 10px 20px rgba(0,0,0,0.2), inset 0 -3px 0 rgba(0,0,0,0.1);
-        }
-        .run-btn:hover:not(:disabled) {
-          transform: translateY(-2px);
-          box-shadow: 0 15px 25px rgba(255,255,255,0.1), inset 0 -3px 0 rgba(0,0,0,0.1);
-        }
-        .run-btn:active:not(:disabled) {
-          transform: translateY(1px);
-          box-shadow: 0 5px 10px rgba(0,0,0,0.2), inset 0 0px 0 rgba(0,0,0,0.1);
-        }
-        .run-btn:disabled {
-          background: #3f3f46;
-          color: #71717a;
-          cursor: not-allowed;
-          box-shadow: none;
-        }
-        
-        /* Cards & Results components */
-        .glass-card { 
-          background: var(--card); 
-          border: 1px solid var(--border); 
-          border-radius: 20px; 
-          backdrop-filter: blur(12px) saturate(180%);
-          box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-          transition: transform 0.3s ease, border-color 0.3s ease;
-        }
-        .glass-card:hover { border-color: rgba(255,255,255,0.1); }
-        
-        .result-section-label {
-          font-size: 12px; 
-          font-weight: 800; 
-          color: var(--text-muted); 
-          letter-spacing: 3px; 
-          margin: 0 0 24px 4px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .result-section-label .num {
-          background: var(--border);
-          color: var(--text);
-          width: 24px;
-          height: 24px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 6px;
-          font-size: 11px;
-        }
-
-        .metric-value {
-          font-size: 48px;
-          font-weight: 900;
-          color: var(--text);
-          font-family: var(--mono);
-          line-height: 1;
-          letter-spacing: -1px;
-        }
-        .metric-unit {
-          font-size: 20px;
-          color: var(--text-muted);
-          margin-left: 4px;
-          font-weight: 500;
-        }
-        
-        /* Tooltip */
-        .custom-tooltip {
-          background: rgba(9, 9, 11, 0.95);
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          padding: 16px;
-          box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-          backdrop-filter: blur(8px);
-        }
-        .tooltip-title {
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 1px;
-          color: var(--text-muted);
-          margin-bottom: 12px;
-        }
-        .tooltip-divider { height: 1px; background: var(--border); margin-bottom: 12px; }
-        .tooltip-item {
-          display: flex;
-          justify-content: space-between;
-          gap: 24px;
-          font-size: 13px;
-          margin-bottom: 6px;
-        }
-        .tooltip-value {
-          font-weight: 700;
-          font-family: var(--mono);
-          color: var(--text);
-        }
-        
-        /* Hero Gen Animations */
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in { animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        
-        /* Empty State */
-        .empty-state {
-          height: 100%;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          color: var(--text-muted);
-        }
-        .empty-state-icon {
-          font-size: 64px;
-          margin-bottom: 24px;
-          background: linear-gradient(135deg, var(--text-muted), #18181b);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          opacity: 0.5;
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700;800&display=swap');
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        html,body{height:100%;overflow:hidden;background:${T.bg};color:${T.text};font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+        input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none}
+        input[type=number]{-moz-appearance:textfield}
+        ::-webkit-scrollbar{width:4px;height:4px}
+        ::-webkit-scrollbar-track{background:transparent}
+        ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:4px}
+        ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.15)}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        .fu{animation:fadeUp .45s cubic-bezier(.16,1,.3,1) both}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .spin{animation:spin .85s linear infinite}
+        @keyframes pulse2{0%,100%{opacity:1}50%{opacity:.35}}
+        .pulse{animation:pulse2 2s ease-in-out infinite}
+        button{font-family:inherit;cursor:pointer}
       `}</style>
 
-      <div className="app-layout">
+      <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden' }}>
 
-        {/* SIDEBAR INPUTS */}
-        <aside className="sidebar">
-          <div className="sidebar-header">
-            <h1 style={{ fontSize: "20px", fontWeight: 800, color: "#fff", letterSpacing: "-0.5px", marginBottom: "4px" }}>
-              Traffic Dashboard <span style={{ color: T.accent }}>Economics</span>
-            </h1>
-            <p style={{ fontSize: "12px", color: T.textMuted, fontWeight: 500 }}>100-Year Life Cycle Analysis</p>
+        {/* ══ SIDEBAR ══════════════════════════════════════════════════════════ */}
+        <aside style={{
+          flexShrink: 0, width: '340px', height: '100%',
+          display: 'flex', flexDirection: 'column',
+          backgroundColor: T.sidebar,
+          backgroundImage: 'radial-gradient(rgba(255,255,255,0.045) 1px, transparent 1px)',
+          backgroundSize: '22px 22px',
+          borderRight: `1px solid ${T.border}`,
+          boxShadow: '4px 0 24px rgba(0,0,0,0.5)',
+        }}>
+          {/* Logo header */}
+          <div style={{ padding: '22px 20px 16px', borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '52px', height: '52px', borderRadius: '12px',
+                background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.3)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '40px', flexShrink: 0,
+              }}>🚦</div>
+              <div>
+                <div style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '-0.3px' }}>
+                  Traffic <span style={{ color: T.violet }}>Economics</span>
+                </div>
+                <div style={{ fontSize: '10px', color: T.textSoft, fontWeight: 500 }}>30-Year Road Lifecycle Decision</div>
+              </div>
+            </div>
           </div>
 
-          <div className="sidebar-content">
+          {/* Scrollable form */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 16px 0' }}>
 
-            <div>
-              <div className="section-title">🚦 Traffic Model</div>
-              <div className="input-grid">
-                <div className="input-group">
-                  <label className="input-label">Total Volume (PCU/h)</label>
-                  <input type="number" className="input-field" value={totalVolume} onChange={e => setTotalVolume(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Num Phases</label>
-                  <select className="input-field" value={numPhases} onChange={e => handleNumPhasesChange(Number(e.target.value))}>
-                    {[2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-
-                {/* Phases internal list */}
-                <div className="input-group full">
-                  <label className="input-label" style={{ marginTop: "8px" }}>Phase Breakdowns (Crit Vol | Lanes)</label>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", background: "rgba(0,0,0,0.2)", padding: "12px", borderRadius: "12px", border: `1px solid ${T.border}` }}>
-                    {phaseData.map((p, i) => (
-                      <div key={i} style={{ display: "flex", gap: "8px" }}>
-                        <div style={{ padding: "8px", background: "rgba(255,255,255,0.05)", borderRadius: "6px", fontSize: "11px", color: T.textMuted, display: "flex", alignItems: "center" }}>P{i + 1}</div>
-                        <input type="number" className="input-field" style={{ flex: 1 }} value={p.criticalVolume} title="Critical Volume" onChange={e => handlePhaseChange(i, 'criticalVolume', Number(e.target.value))} />
-                        <input type="number" className="input-field" style={{ width: "60px", textAlign: "center" }} value={p.lanes} title="Lanes" onChange={e => handlePhaseChange(i, 'lanes', Number(e.target.value))} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="input-group">
-                  <label className="input-label">Vehicle Occupancy</label>
-                  <input type="number" step="0.1" className="input-field" value={occupancy} onChange={e => setOccupancy(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Traffic Growth (%)</label>
-                  <input type="number" step="0.1" className="input-field" value={trafficGrowth} onChange={e => setTrafficGrowth(Number(e.target.value))} />
-                </div>
+            <GroupHead>🚧 Traffic Model</GroupHead>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <FieldGroup label="Total Traffic Volume (PCU/h)" value={totalVol} onChange={setTotalVol} />
+              <div>
+                <InputLabel>Total Number of Phases</InputLabel>
+                <select value={numPhases} onChange={e => changePhases(Number(e.target.value))} style={{
+                  width: '100%', background: 'rgba(0,0,0,0.4)', border: `1px solid ${T.border}`,
+                  borderRadius: '8px', padding: '9px 11px', color: T.text, fontFamily: T.mono,
+                  fontSize: '15px', outline: 'none', appearance: 'none', cursor: 'pointer',
+                }}>
+                  {[2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>{n} phases</option>)}
+                </select>
               </div>
+              <FieldGroup label="Occupancy" value={occupancy} onChange={setOccupancy} step="0.1" />
+              <FieldGroup label="Traffic Growth %" value={trafGrowth} onChange={setTrafGrowth} step="0.1" />
             </div>
 
-            <div>
-              <div className="section-title">📉 Economic Constants</div>
-              <div className="input-grid">
-                <div className="input-group full">
-                  <label className="input-label">City GDP (₹ Cr)</label>
-                  <input type="number" className="input-field" value={gdp} onChange={e => setGdp(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Population</label>
-                  <input type="number" className="input-field" value={population} onChange={e => setPopulation(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">WACC (Discount %)</label>
-                  <input type="number" step="0.1" className="input-field" value={discountRate} onChange={e => setDiscountRate(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">GDP Growth (%)</label>
-                  <input type="number" step="0.1" className="input-field" value={gdpGrowth} onChange={e => setGdpGrowth(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Inflation (%)</label>
-                  <input type="number" step="0.1" className="input-field" value={inflationRate} onChange={e => setInflationRate(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Fuel (₹/L)</label>
-                  <input type="number" className="input-field" value={fuelCost} onChange={e => setFuelCost(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Idle (L/h)</label>
-                  <input type="number" step="0.1" className="input-field" value={fuelConsumptionIdle} onChange={e => setFuelConsumptionIdle(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Avg VOC (₹/km)</label>
-                  <input type="number" step="0.1" className="input-field" value={vocPerKm} onChange={e => setVocPerKm(Number(e.target.value))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Carbon (₹/kg)</label>
-                  <input type="number" step="0.1" className="input-field" value={carbonCost} onChange={e => setCarbonCost(Number(e.target.value))} />
-                </div>
+            {/* Phase table */}
+            <div style={{ marginTop: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '10px', border: `1px solid ${T.border}`, overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 52px', gap: '0', padding: '6px 8px 4px', borderBottom: `1px solid ${T.border}` }}>
+                <span />
+                <span style={{ fontSize: '11px', color: T.textMuted, fontWeight: 700, letterSpacing: '1px' }}>ANNUAL AVERAGE DAILY CRITICAL VOLUME (PCU/H/LANE)</span>
+                <span style={{ fontSize: '11px', color: T.textMuted, fontWeight: 700, letterSpacing: '1px', textAlign: 'center' }}>NO. OF LANES</span>
               </div>
+              {phaseData.map((p, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 52px', gap: '0', padding: '4px 8px', alignItems: 'center', borderBottom: i < phaseData.length - 1 ? `1px solid ${T.border}` : 'none' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 800, color: T.violet }}>P{i + 1}</div>
+                  <input type="number" value={p.criticalVolume} onChange={e => setPhase(i, 'criticalVolume', Number(e.target.value))}
+                    style={{ background: 'transparent', border: 'none', color: T.text, fontFamily: T.mono, fontSize: '14px', outline: 'none', width: '100%', padding: '5px' }}
+                  />
+                  <input type="number" value={p.lanes} onChange={e => setPhase(i, 'lanes', Number(e.target.value))}
+                    style={{ background: 'transparent', border: 'none', color: T.textSoft, fontFamily: T.mono, fontSize: '14px', outline: 'none', width: '100%', padding: '5px', textAlign: 'center' }}
+                  />
+                </div>
+              ))}
             </div>
 
-            <div>
-              <div className="section-title">🏗️ Infrastructure Bids</div>
-              <div className="input-grid">
-                <div className="input-group full">
-                  <label className="input-label">Grade Separation Construction (₹ Cr)</label>
-                  <input type="number" className="input-field" value={constructionCost} onChange={e => setConstructionCost(Number(e.target.value))} />
-                </div>
-                <div className="input-group full">
-                  <label className="input-label">Signal Installation (₹)</label>
-                  <input type="number" className="input-field" value={signalInstallCost} onChange={e => setSignalInstallCost(Number(e.target.value))} />
-                </div>
-                <div className="input-group full">
-                  <label className="input-label">Signal Annual Maintenance (₹)</label>
-                  <input type="number" className="input-field" value={signalMaintAnnual} onChange={e => setSignalMaintAnnual(Number(e.target.value))} />
-                </div>
-              </div>
+            <GroupHead>💰 Economic Parameters</GroupHead>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <FieldGroup label="City GDP (₹ Cr)" value={gdp} onChange={setGdp} full />
+              <FieldGroup label="Population" value={population} onChange={setPopulation} />
+              <FieldGroup label="Discount Rate %" value={discount} onChange={setDiscount} step="0.1" />
+              <FieldGroup label="GDP Growth %" value={gdpGrowth} onChange={setGdpGrowth} step="0.1" />
+              <FieldGroup label="Inflation %" value={inflation} onChange={setInflation} step="0.1" />
+              <FieldGroup label="Fuel (₹/L)" value={fuelCost} onChange={setFuelCost} />
+              <FieldGroup label="Idle (L/h)" value={idleFuel} onChange={setIdleFuel} step="0.1" />
+              <FieldGroup label="VOC (₹/km)" value={voc} onChange={setVoc} step="0.1" />
+              <FieldGroup label="Carbon (₹/kg)" value={carbon} onChange={setCarbon} step="0.1" />
             </div>
 
+            <GroupHead>🏗️ Infrastructure</GroupHead>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px', marginBottom: '20px' }}>
+              <FieldGroup label="Grade Sep. Build (₹ Cr)" value={buildCost} onChange={setBuildCost} />
+              <FieldGroup label="Grade Sep. Annual O&M (₹)" value={gradeMaint} onChange={setGradeMaint} />
+              <FieldGroup label="Signal Install (₹)" value={sigInstall} onChange={setSigInstall} />
+              <FieldGroup label="Signal Annual Maint. (₹)" value={sigMaint} onChange={setSigMaint} />
+            </div>
           </div>
 
-          <div className="sidebar-footer">
-            {error && <div style={{ marginBottom: "16px", padding: "12px", background: "rgba(244,63,94,0.1)", borderRadius: "8px", border: `1px solid ${T.red}`, color: T.red, fontSize: "12px", fontWeight: 600 }}>{error}</div>}
-            <button className="run-btn" onClick={analyze} disabled={isAnalyzing}>
-              {isAnalyzing ? "Processing Matrix..." : "RUN ANALYSIS"}
+          {/* Run button */}
+          <div style={{ padding: '16px', borderTop: `1px solid ${T.border}`, background: 'rgba(0,0,0,0.3)', flexShrink: 0 }}>
+            {error && (
+              <div style={{ marginBottom: '10px', padding: '10px 12px', background: 'rgba(244,63,94,0.1)', border: `1px solid rgba(244,63,94,0.3)`, borderRadius: '8px', fontSize: '11px', color: T.red, fontWeight: 600 }}>
+                ⚠ {error}
+              </div>
+            )}
+            <button onClick={run} disabled={loading} style={{
+              width: '100%', padding: '14px', borderRadius: '10px', border: 'none',
+              background: loading ? '#1a1a22' : '#ffffff',
+              color: loading ? T.textMuted : '#07070a',
+              fontWeight: 800, fontSize: '14px', letterSpacing: '1.5px',
+              boxShadow: loading ? 'none' : '0 6px 20px rgba(255,255,255,0.08)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              transition: 'all 0.2s',
+            }}>
+              {loading ? (
+                <>
+                  <div className="spin" style={{ width: '12px', height: '12px', borderRadius: '50%', border: `2px solid rgba(255,255,255,0.15)`, borderTopColor: T.violet }} />
+                  COMPUTING...
+                </>
+              ) : 'RUN ANALYSIS'}
             </button>
           </div>
         </aside>
 
-        {/* MAIN DESK (RESULTS) */}
-        <main className="main-content" ref={mainContentRef}>
-          {!result && !isAnalyzing && (
-            <div className="empty-state">
-              <div className="empty-state-icon animate-fade-in" style={{ animationDelay: "0ms" }}>⌘</div>
-              <h2 className="animate-fade-in" style={{ animationDelay: "100ms", fontSize: "24px", color: "#fff", marginBottom: "12px", fontWeight: 800 }}>Workspace Ready</h2>
-              <p className="animate-fade-in" style={{ animationDelay: "200ms", fontSize: "14px", maxWidth: "400px", lineHeight: 1.6 }}>Dial your intersection constraints and economic vectors on the left sidebar to generate a 100-year infrastructure lifecycle matrix.</p>
+        {/* ══ MAIN ═════════════════════════════════════════════════════════════ */}
+        <main ref={mainRef} style={{
+          flex: 1, minWidth: 0, height: '100%',
+          overflowY: 'auto', overflowX: 'hidden',
+          backgroundColor: T.bg,
+          backgroundImage: `radial-gradient(ellipse 60% 40% at 65% 5%, rgba(167,139,250,0.08) 0%, transparent 55%), radial-gradient(rgba(255,255,255,0.032) 1px, transparent 1px)`,
+          backgroundSize: `100% 100%, 22px 22px`,
+          display: 'flex', flexDirection: 'column',
+        }}>
+
+          {/* ── Empty state ─────────────────────────────────────────────────── */}
+          {!result && !loading && (
+            <div className="fu" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 32px', textAlign: 'center' }}>
+              <div style={{ fontSize: '80px', marginBottom: '24px', opacity: 0.08, lineHeight: 1 }}>◈</div>
+              <h2 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '10px' }}>Workspace Ready</h2>
+              <p style={{ fontSize: '13px', color: T.textMuted, maxWidth: '360px', lineHeight: 1.7, marginBottom: '32px' }}>
+                Configure your intersection parameters on the left and run the 30-year lifecycle computation.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {["Webster's Method", "NPV Analysis", "IRR Modeling", "Sensitivity Tests", "Scenario Planning"].map(t => (
+                  <div key={t} style={{ padding: '5px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.04)', border: `1px solid ${T.border}`, fontSize: '11px', color: T.textMuted }}>{t}</div>
+                ))}
+              </div>
             </div>
           )}
 
-          {isAnalyzing && (
-            <div className="empty-state">
-              <div style={{ width: "40px", height: "40px", borderRadius: "50%", border: `3px solid ${T.border}`, borderTopColor: T.accent, animation: "spin 1s linear infinite" }} />
-              <p style={{ marginTop: "24px", fontSize: "14px", color: T.textMuted, fontWeight: 600, letterSpacing: "1px", textTransform: "uppercase" }}>Computing 100-year arrays...</p>
-              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          {/* ── Loading state ────────────────────────────────────────────────── */}
+          {loading && (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
+              <div className="spin" style={{ width: '44px', height: '44px', borderRadius: '50%', border: `3px solid rgba(255,255,255,0.06)`, borderTopColor: T.violet }} />
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: T.textMuted, letterSpacing: '2px', textTransform: 'uppercase', textAlign: 'center' }}>Computing Matrix</div>
+                <div className="pulse" style={{ fontSize: '11px', color: T.textMuted, marginTop: '6px', textAlign: 'center' }}>Running Webster · Discounting flows · Sensitivity sweeps</div>
+              </div>
             </div>
           )}
 
-          {result && !isAnalyzing && (
-            <div className="main-content-inner animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "64px" }}>
+          {/* ── Results ───────────────────────────────────────────────────────── */}
+          {result && !loading && (() => {
+            const signalData = chrt.comps_sampled.map((c, i) => ({ year: c.year, val: chrt.cf_s[i] }));
+            const gradeData = chrt.comps_sampled.map((c, i) => ({ year: c.year, val: chrt.cf_g[i] }));
+            const incData = chrt.comps_sampled.map((c, i) => ({ year: c.year, val: chrt.inc_cumulative[i] }));
+            const sensMax = chrt.sensitivities[0]?.spread ?? 1;
 
-              {/* 1. WEBSTER'S SIGNAL METRICS */}
-              <div>
-                <div className="result-section-label"><span className="num">1</span> WEBSTER'S SIGNAL DIAGNOSTICS</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "24px" }}>
-                  <div className="glass-card" style={{ padding: "32px" }}>
-                    <div style={{ fontSize: "12px", color: T.textMuted, fontWeight: 700, marginBottom: "12px", letterSpacing: "1px" }}>OPTIMAL CYCLE TIME</div>
-                    <div className="metric-value">{result.webster.cycle_time.toFixed(0)}<span className="metric-unit">s</span></div>
-                  </div>
-                  <div className="glass-card" style={{ padding: "32px", position: "relative", overflow: "hidden" }}>
-                    <div style={{ position: "absolute", inset: 0, background: `radial-gradient(circle at 100% 0%, ${T.accentGlow}, transparent 70%)` }} />
-                    <div style={{ position: "relative" }}>
-                      <div style={{ fontSize: "12px", color: T.textMuted, fontWeight: 700, marginBottom: "12px", letterSpacing: "1px" }}>AVG VEHICLE DELAY</div>
-                      <div className="metric-value" style={{ color: T.accent }}>{result.webster.avg_delay.toFixed(1)}<span className="metric-unit" style={{ color: T.textMuted }}>s</span></div>
-                    </div>
-                  </div>
-                  <div className="glass-card" style={{ padding: "32px" }}>
-                    <div style={{ fontSize: "12px", color: T.textMuted, fontWeight: 700, marginBottom: "12px", letterSpacing: "1px" }}>DEGREE OF SATURATION</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-                      <div className="metric-value" style={{ color: result.webster.sum_flow_ratios >= 0.95 ? T.red : T.text }}>
-                        {result.webster.sum_flow_ratios.toFixed(2)}
-                      </div>
-                      <div style={{ height: "6px", flex: 1, background: "rgba(0,0,0,0.5)", borderRadius: "3px", overflow: "hidden", border: `1px solid ${T.border}` }}>
-                        <div style={{ height: "100%", background: result.webster.sum_flow_ratios >= 0.95 ? T.red : T.green, width: `${Math.min(100, result.webster.sum_flow_ratios * 100)}%`, transition: "width 1s cubic-bezier(0.4, 0, 0.2, 1)" }} />
-                      </div>
-                    </div>
-                    {result.webster.is_saturated && <div style={{ fontSize: "11px", color: T.red, marginTop: "16px", fontWeight: 700, padding: "8px 12px", background: "rgba(244,63,94,0.1)", borderRadius: "6px" }}>⚠️ Highway Capacity Exceeded (Y {'>'} 0.95)</div>}
-                  </div>
-                </div>
-              </div>
+            return (
+              <div className="fu" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
 
-              {/* HERO RECOMMENDATION */}
-              <div className="glass-card" style={{ padding: "48px", border: `1px solid ${result.economic.delta_npv > 0 || result.webster.is_saturated ? T.green : T.amber}`, position: "relative", overflow: "hidden", display: "flex", flexDirection: "column", gap: "24px", boxShadow: `0 20px 60px -10px ${result.economic.delta_npv > 0 || result.webster.is_saturated ? T.greenGlow : 'rgba(245,158,11,0.05)'}` }}>
-                {/* Glow ring background */}
-                <div style={{ position: "absolute", top: "-50%", left: "-20%", width: "150%", height: "200%", background: `radial-gradient(circle at top left, ${result.economic.delta_npv > 0 || result.webster.is_saturated ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.04)'}, transparent 60%)`, pointerEvents: "none" }} />
-
-                <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: "20px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: result.economic.delta_npv > 0 || result.webster.is_saturated ? T.green : T.amber, boxShadow: `0 0 16px 2px ${result.economic.delta_npv > 0 || result.webster.is_saturated ? T.green : T.amber}` }} />
-                    <div style={{ fontSize: "13px", fontWeight: 800, color: T.textSoft, letterSpacing: "2px" }}>ECONOMIC ANALYSIS</div>
-                  </div>
-
-                  <h2 style={{ fontSize: "64px", fontWeight: 900, color: "#fff", margin: 0, letterSpacing: "-2px", lineHeight: 1 }}>{result.decision.choice}</h2>
-
-                  <div style={{ display: "inline-flex", alignSelf: "flex-start", padding: "8px 16px", borderRadius: "100px", border: `1px solid ${result.decision.status.includes('Recommended') || result.decision.status.includes('Mandatory') ? T.green : T.amber}`, background: "rgba(0,0,0,0.5)", fontSize: "12px", color: result.decision.status.includes('Recommended') || result.decision.status.includes('Mandatory') ? T.green : T.amber, fontWeight: 700, letterSpacing: "1px" }}>
-                    STATUS: {result.decision.status.toUpperCase()}
-                  </div>
-
-                  <p style={{ fontSize: "16px", color: T.textSoft, lineHeight: 1.8, maxWidth: "800px", margin: "8px 0 0 0", fontWeight: 400 }}>
-                    Based on the 100-year infrastructural economic analysis (at {discountRate}% WACC):
-                    {result.economic.delta_npv > 0 ? (
-                      <> The structural lifespan unlocks an incredible NPV economic advantage of <strong style={{ color: "#fff" }}>{fmtCr(result.economic.delta_npv)}</strong> to society. The internal rate of return stands at <strong style={{ color: T.green }}>{fmtRatio(result.economic.irr)}%</strong>—surpassing standard hurdle thresholds. Break-even achieved in <strong style={{ color: "#fff" }}>{result.economic.payback || "never"}</strong> years.</>
-                    ) : (
-                      <> Grade infrastructure cannot be justified given identical growth bounds. A flat-grade traffic signal limits NPV capital loss by <strong style={{ color: "#fff" }}>{fmtCr(Math.abs(result.economic.delta_npv))}</strong> relative to the heavy construction alternative.</>
-                    )}
-                  </p>
-
-                  <div style={{ marginTop: "12px", padding: "20px 24px", background: "rgba(0,0,0,0.4)", borderRadius: "12px", borderLeft: `2px solid ${T.accent}`, fontSize: "14px", lineHeight: 1.6, color: T.textSoft }}>
-                    <span style={{ color: "#fff", fontWeight: 600 }}>System Reasoning &mdash;</span> {result.decision.reason}
-                  </div>
-                </div>
-              </div>
-
-              {/* DASHBOARD CHARTS */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: "32px" }}>
-
-                {/* 2. CASH FLOW DIAGRAMS OF BOTH ALTERNATIVES */}
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <div className="result-section-label"><span className="num">2</span> ABSOLUTE CASH FLOW DECAY (Option A vs B)</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "32px" }}>
-                    <div className="glass-card" style={{ padding: "32px 32px 40px 32px", display: "flex", flexDirection: "column" }}>
-                      <h4 style={{ fontSize: "15px", color: "#fff", fontWeight: 700, marginBottom: "8px" }}>Traffic Signal Vector</h4>
-                      <p style={{ fontSize: "12px", color: T.textMuted, marginBottom: "32px" }}>Compounding operational losses bleeding from permanent intersection throttling.</p>
-                      <ResponsiveContainer width="100%" height={260}>
-                        <AreaChart data={result.charts.comps_sampled.map((c, i) => ({ year: c.year, val: result.charts.cf_s[i] / 1e7 }))} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                          <defs>
-                            <linearGradient id="colorSignal" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={T.red} stopOpacity={0.4} />
-                              <stop offset="95%" stopColor={T.red} stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke={"rgba(255,255,255,0.03)"} vertical={false} />
-                          <XAxis dataKey="year" tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} width={80} tickFormatter={(v) => `₹${v.toFixed(0)}C`} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Area type="monotone" dataKey="val" name="Signal Cash Flow" stroke={T.red} strokeWidth={2} fillOpacity={1} fill="url(#colorSignal)" />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    <div className="glass-card" style={{ padding: "32px 32px 40px 32px", display: "flex", flexDirection: "column" }}>
-                      <h4 style={{ fontSize: "15px", color: "#fff", fontWeight: 700, marginBottom: "8px" }}>Grade Separation Vector</h4>
-                      <p style={{ fontSize: "12px", color: T.textMuted, marginBottom: "32px" }}>Socio-economic growth offsetting the initial massive structural investment dip.</p>
-                      <ResponsiveContainer width="100%" height={260}>
-                        <AreaChart data={result.charts.comps_sampled.map((c, i) => ({ year: c.year, val: result.charts.cf_g[i] / 1e7 }))} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                          <defs>
-                            <linearGradient id="colorGS" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={T.green} stopOpacity={0.4} />
-                              <stop offset="95%" stopColor={T.green} stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke={"rgba(255,255,255,0.03)"} vertical={false} />
-                          <XAxis dataKey="year" tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} width={80} tickFormatter={(v) => `₹${v.toFixed(0)}C`} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <ReferenceLine y={0} stroke="rgba(255,255,255,0.1)" />
-                          <Area type="monotone" dataKey="val" name="Grade Sep Cash Flow" stroke={T.green} strokeWidth={2} fillOpacity={1} fill="url(#colorGS)" />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
+                {/* KPI ribbon — compact, wraps on small screens */}
+                <div style={{
+                  display: 'flex', alignItems: 'stretch', flexWrap: 'nowrap', overflowX: 'auto',
+                  background: 'rgba(0, 0, 0, 0.5)', borderBottom: `2px solid ${T.border}`,
+                  backdropFilter: 'blur(20px)', flexShrink: 0,
+                }}>
+                  <KpiCell label="Decision" value={dec.choice} color={hColor} />
+                  <KpiCell label="NPV" value={fmtCr(eco.delta_npv)} color={eco.delta_npv > 0 ? T.green : T.red} />
+                  <KpiCell label="IRR" value={`${fmt2(eco.irr)}%`} color={eco.irr > discount ? T.green : T.red} />
+                  <KpiCell label="Payback" value={eco.payback ? `Yr ${eco.payback}` : 'N/A'} color={T.amber} />
+                  <KpiCell label="Saturation" value={fmt2(web.sum_flow_ratios)} color={web.is_saturated ? T.red : T.green} />
+                  <KpiCell label="Cycle" value={`${web.cycle_time.toFixed(0)}s`} color={T.cyan} />
+                  <KpiCell label="Avg Delay" value={`${web.avg_delay.toFixed(1)}s`} color={T.violet} />
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 20px', justifyContent: 'flex-end' }}>
+                    <Tag color={hColor} small>{dec.status}</Tag>
                   </div>
                 </div>
 
-                {/* 3. INCREMENTAL NPV ANALYSIS */}
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <div className="result-section-label"><span className="num">3</span> NET INCREMENTAL ADVANTAGE (NPV)</div>
-                  <div className="glass-card" style={{ padding: "32px 32px 40px 32px" }}>
-                    <p style={{ fontSize: "13px", color: T.textSoft, marginBottom: "32px" }}>Tracking the continuous gap in societal economic value generated strictly by underpass adoption.</p>
-                    <ResponsiveContainer width="100%" height={360}>
-                      <AreaChart data={result.charts.comps_sampled.map((c, i) => ({ year: c.year, val: result.charts.inc_cumulative[i] }))} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="colorInc" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={T.accent} stopOpacity={0.4} />
-                            <stop offset="100%" stopColor={T.accent} stopOpacity={0.0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke={"rgba(255,255,255,0.03)"} vertical={false} />
-                        <XAxis dataKey="year" tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} dy={10} minTickGap={20} />
-                        <YAxis tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} width={80} tickFormatter={(v) => `₹${v.toFixed(0)}C`} />
-                        <Tooltip content={<CustomTooltip />} />
-                        <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" />
-                        <Area type="monotone" dataKey="val" name="Net Advantage" stroke={T.accent} strokeWidth={3} fillOpacity={1} fill="url(#colorInc)" style={{ filter: `drop-shadow(0 4px 12px ${T.accentGlow})` }} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
+                {/* Tab bar — scrollable, no overflow */}
+                <div style={{
+                  display: 'flex', alignItems: 'flex-end', padding: '0 20px',
+                  background: 'rgba(0,0,0,0.3)', borderBottom: `1px solid ${T.border}`,
+                  overflowX: 'auto', flexShrink: 0,
+                }}>
+                  {TABS.map(t => {
+                    const active = tab === t.id;
+                    return (
+                      <button key={t.id} onClick={() => setTab(t.id)} style={{
+                        padding: '10px 20px', border: 'none', background: 'none',
+                        color: active ? T.text : T.textMuted,
+                        fontWeight: active ? 700 : 500, fontSize: '15px',
+                        borderBottom: `2px solid ${active ? T.violet : 'transparent'}`,
+                        display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap',
+                        transition: 'color 0.15s, border-color 0.15s', flexShrink: 0,
+                      }}>
+                        <span style={{ fontSize: '15px' }}>{t.icon}</span>{t.label}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {/* 4. ANNUAL LOSS COMPOSITION */}
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <div className="result-section-label"><span className="num">4</span> ANNUAL LOSS COMPOSITION DRIVERS</div>
-                  <div className="glass-card" style={{ padding: "32px 32px 40px 32px" }}>
-                    <p style={{ fontSize: "13px", color: T.textSoft, marginBottom: "32px" }}>Anatomical breakdown of compounding traffic decay metrics vs static structural lifecycle management.</p>
-                    <ResponsiveContainer width="100%" height={360}>
-                      <BarChart data={result.charts.comps_sampled} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barSize={16}>
-                        <CartesianGrid strokeDasharray="3 3" stroke={"rgba(255,255,255,0.03)"} vertical={false} />
-                        <XAxis dataKey="year" tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} dy={10} />
-                        <YAxis tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} width={80} tickFormatter={(v) => `₹${v.toFixed(0)}C`} />
-                        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-                        <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "24px", color: T.textSoft }} iconType="circle" />
-                        <Bar dataKey="tvl" stackId="A" fill={T.chartColors[0]} name="Time Value" radius={[0, 0, 4, 4]} />
-                        <Bar dataKey="afc" stackId="A" fill={T.chartColors[1]} name="Fuel Loss" />
-                        <Bar dataKey="voc" stackId="A" fill={T.chartColors[2]} name="Vehicle Wear" />
-                        <Bar dataKey="carbon" stackId="A" fill={T.chartColors[3]} name="Carbon" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="maint_g" fill={T.cyan} name="Structural UP Maint." radius={[4, 4, 4, 4]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                {/* Tab panels */}
+                <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '28px 20px 64px' }}>
+                  <div style={{ width: '100%' }}>
 
-              </div>
+                    {/* ── SIGNAL ─────────────────────────────────────────────── */}
+                    {tab === 'signal' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+                        <SectionLabel num="1">Webster's Signal Diagnostics</SectionLabel>
 
-              {/* 5. SCENARIOS DECK */}
-              <div>
-                <div className="result-section-label"><span className="num">5</span> 100-YEAR NPV HORIZON SCENARIOS</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "24px" }}>
-                  {[
-                    { name: "PESSIMISTIC", val: result.charts.scenarios.pessimistic, desc: "Recession growth, capital shocks", icon: "rgba(244,63,94" },
-                    { name: "BASE CASE", val: result.charts.scenarios.base, desc: "Current modeled trajectory", active: true, icon: "rgba(139,92,246" },
-                    { name: "OPTIMISTIC", val: result.charts.scenarios.optimistic, desc: "High macro-growth acceleration", icon: "rgba(16,185,129" }
-                  ].map((sc, i) => (
-                    <div key={i} className="glass-card" style={{ padding: "32px 24px", display: "flex", flexDirection: "column", border: sc.active ? `1px solid ${T.accent}` : `1px solid var(--border)`, background: sc.active ? `linear-gradient(145deg, rgba(139,92,246,0.1), var(--card))` : `var(--card)` }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
-                        <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: `${sc.icon},0.15)`, border: `1px solid ${sc.icon},0.3)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: `${sc.icon},1)` }} />
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                          <MetricCard icon="⏱" label="Optimal Cycle Time" value={web.cycle_time.toFixed(0)} unit="s" />
+                          <MetricCard icon="⌛" label="Avg Delay / Vehicle" value={web.avg_delay.toFixed(1)} unit="s" color={T.violet} />
+                          <MetricCard icon="📶" label="Degree of Saturation" value={web.sum_flow_ratios.toFixed(3)}
+                            color={web.is_saturated ? T.red : T.green}
+                            sub={web.is_saturated ? '⚠️ Y > 0.95 — intersection saturated' : '✓ Within capacity bounds'} />
                         </div>
-                        <div style={{ fontSize: "12px", fontWeight: 800, color: sc.active ? "#fff" : T.textMuted, letterSpacing: "1.5px" }}>{sc.name}</div>
-                      </div>
-                      <div className="metric-value" style={{ color: sc.val > 0 ? T.green : T.red, fontSize: "40px", marginBottom: "12px" }}>{fmtCr(sc.val)}</div>
-                      <div style={{ fontSize: "12px", color: T.textSoft, lineHeight: 1.5 }}>{sc.desc}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: "32px" }}>
-                {/* 6. SENSITIVITY ANALYSIS */}
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <div className="result-section-label"><span className="num">6</span> NPV SENSITIVITY TORNADO (± 20%)</div>
-                  <div className="glass-card" style={{ padding: "32px", display: "flex", flexDirection: "column", gap: "24px" }}>
-                    <p style={{ fontSize: "13px", color: T.textSoft, margin: 0 }}>Mapping boundary risk by scaling specific matrix constraints independently securely holding all other vectors neutral.</p>
+                        {/* Saturation gauge */}
+                        <Card style={{ padding: '24px 28px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 700, color: T.textMuted, letterSpacing: '1px' }}>SATURATION GAUGE (Y = {web.sum_flow_ratios.toFixed(3)})</div>
+                            <Tag color={web.is_saturated ? T.red : T.green} small>{web.is_saturated ? 'OVER CAPACITY' : 'IN BOUNDS'}</Tag>
+                          </div>
+                          <ProgressBar pct={(web.sum_flow_ratios / 1.2) * 100} color={web.is_saturated ? T.red : T.green} h={10} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '9px', color: T.textMuted }}>
+                            <span>Y = 0</span><span style={{ color: T.amber }}>Critical 0.95</span><span>1.20</span>
+                          </div>
+                        </Card>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                      {result.charts.sensitivities.map((s, i) => {
-                        const maxSpread = result.charts.sensitivities[0].spread;
-                        return (
-                          <div key={i}>
-                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 700, color: "#fff", marginBottom: "10px", fontFamily: T.mono }}>
-                              <span style={{ textTransform: "uppercase", letterSpacing: "1px" }}>{s.variable}</span>
-                              <span style={{ color: T.textMuted }}>SPREAD: {fmtCr(s.spread)}</span>
+                        {/* Recommendation hero */}
+                        <SectionLabel num="✦">Infrastructure Recommendation</SectionLabel>
+                        <Card glow={isGS ? 'green' : 'red'} style={{ padding: '40px', position: 'relative' }}>
+                          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: `radial-gradient(ellipse 70% 60% at 8% 20%, ${hColor}07, transparent 55%)`, pointerEvents: 'none' }} />
+                          <div style={{ position: 'relative' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                              <div className="pulse" style={{ width: '7px', height: '7px', borderRadius: '50%', background: hColor, boxShadow: `0 0 8px ${hColor}` }} />
+                              <span style={{ fontSize: '10px', fontWeight: 800, color: T.textMuted, letterSpacing: '2px' }}>ECONOMIC ANALYSIS</span>
                             </div>
-
-                            <div style={{ height: "40px", display: "flex", alignItems: "center", position: "relative", background: "rgba(0,0,0,0.5)", borderRadius: "8px", border: `1px solid rgba(255,255,255,0.05)`, padding: "4px" }}>
-                              <div style={{ width: "2px", height: "100%", background: "rgba(255,255,255,0.8)", position: "absolute", left: "50%", zIndex: 1, boxShadow: "0 0 10px rgba(255,255,255,0.5)" }} />
-
-                              <div style={{ flex: 1, height: "100%", display: "flex", justifyContent: "flex-end" }}>
-                                {s.low_npv < result.economic.delta_npv && (
-                                  <div style={{ background: `linear-gradient(270deg, ${T.red}, #4c1d95)`, height: "100%", width: `${Math.min(100, Math.abs(s.low_npv - result.economic.delta_npv) / maxSpread * 100)}%`, borderRadius: "4px 0 0 4px", borderRight: `2px solid #fff` }} />
-                                )}
-                                {s.high_npv < result.economic.delta_npv && (
-                                  <div style={{ background: `linear-gradient(270deg, ${T.cyan}, #0891b2)`, height: "100%", width: `${Math.min(100, Math.abs(s.high_npv - result.economic.delta_npv) / maxSpread * 100)}%`, borderRadius: "4px 0 0 4px", borderRight: `2px solid #fff` }} />
-                                )}
-                              </div>
-                              <div style={{ flex: 1, height: "100%", display: "flex" }}>
-                                {s.high_npv > result.economic.delta_npv && (
-                                  <div style={{ background: `linear-gradient(90deg, ${T.green}, #064e3b)`, height: "100%", width: `${Math.min(100, Math.abs(s.high_npv - result.economic.delta_npv) / maxSpread * 100)}%`, borderRadius: "0 4px 4px 0", borderLeft: `2px solid #fff` }} />
-                                )}
-                                {s.low_npv > result.economic.delta_npv && (
-                                  <div style={{ background: `linear-gradient(90deg, ${T.accent}, #4c1d95)`, height: "100%", width: `${Math.min(100, Math.abs(s.low_npv - result.economic.delta_npv) / maxSpread * 100)}%`, borderRadius: "0 4px 4px 0", borderLeft: `2px solid #fff` }} />
-                                )}
-                              </div>
+                            <h2 style={{ fontSize: '56px', fontWeight: 900, color: '#fff', letterSpacing: '-2px', lineHeight: 1, marginBottom: '16px' }}>{dec.choice}</h2>
+                            <Tag color={hColor}>{dec.status}</Tag>
+                            <p style={{ marginTop: '20px', fontSize: '14px', color: T.textSoft, lineHeight: 1.9, maxWidth: '760px' }}>
+                              Based on 30-year lifecycle analysis at <strong style={{ color: '#fff' }}>{discount}% Discount Rate</strong>:&nbsp;
+                              {eco.delta_npv > 0
+                                ? <>Grade Separation delivers an NPV advantage of <strong style={{ color: T.green }}>{fmtCr(eco.delta_npv)}</strong>. IRR = <strong style={{ color: T.green }}>{fmt2(eco.irr)}%</strong>, clearing the hurdle rate. Payback in <strong style={{ color: '#fff' }}>{eco.payback ?? 'N/A'}</strong> years.</>
+                                : <>Signal preserves <strong style={{ color: T.amber }}>{fmtCr(Math.abs(eco.delta_npv))}</strong> of NPV: construction cost outweighs lifetime traffic gains.</>
+                              }
+                            </p>
+                            <div style={{ marginTop: '24px', padding: '16px 20px', background: 'rgba(0,0,0,0.3)', borderRadius: '10px', borderLeft: `3px solid ${T.violet}`, fontSize: '13px', lineHeight: 1.7, color: T.textSoft }}>
+                              <strong style={{ color: T.text }}>Reasoning: </strong>{dec.reason}
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
+                        </Card>
+                      </div>
+                    )}
 
-                {/* 7. IRR ANALYSIS */}
-                <div>
-                  <div className="result-section-label"><span className="num">7</span> INTERNAL RATE OF RETURN</div>
-                  <div className="glass-card" style={{ padding: "40px 32px", display: "flex", flexDirection: "column", height: "calc(100% - 36px)" }}>
-                    <p style={{ fontSize: "13px", color: T.textSoft, marginBottom: "32px" }}>Raw yield magnitude generated by structural infrastructure scaled against capital WACC bounds.</p>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "20px", marginTop: "auto" }}>
-                      <div>
-                        <div style={{ fontSize: "11px", color: T.textMuted, fontWeight: 800, letterSpacing: "1.5px", marginBottom: "8px" }}>ACTUAL YIELD</div>
-                        <div className="metric-value" style={{ color: result.economic.irr > discountRate ? T.green : T.red }}>{fmtRatio(result.economic.irr)}<span className="metric-unit">%</span></div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: "11px", color: T.textMuted, fontWeight: 800, letterSpacing: "1.5px", marginBottom: "8px" }}>WACC TARGET</div>
-                        <div className="metric-value" style={{ fontSize: "28px", color: "#fff" }}>{discountRate}<span className="metric-unit">%</span></div>
-                      </div>
-                    </div>
-                    {(() => {
-                      let maxVisual = Math.max(50, result.economic.irr || 0);
-                      let hurdleScale = (discountRate / maxVisual) * 100;
-                      let irrScale = ((result.economic.irr || 0) / maxVisual) * 100;
-                      return (
-                        <div style={{ height: "24px", background: "rgba(0,0,0,0.6)", borderRadius: "12px", position: "relative", border: `1px solid rgba(255,255,255,0.05)` }}>
-                          <div style={{ position: "absolute", left: `${hurdleScale}%`, top: "-6px", bottom: "-6px", width: "4px", background: "#fff", zIndex: 10, borderRadius: "2px", boxShadow: "0 0 10px rgba(255,255,255,0.8)" }} />
-                          <div style={{ position: "absolute", top: "2px", left: "2px", bottom: "2px", background: result.economic.irr > discountRate ? T.gradGreen : T.gradRed, width: `calc(${irrScale}% - 4px)`, borderRadius: "10px" }} />
+                    {/* ── CASH FLOWS ─────────────────────────────────────────── */}
+                    {tab === 'cashflow' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+                        <SectionLabel num="2">Absolute Cash Flow Trajectories</SectionLabel>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '20px' }}>
+
+                          <ChartShell title="Option A: Traffic Signal" sub="Compounding societal losses from permanent intersection delay over 30 years.">
+                            <ResponsiveContainer width="100%" height={310}>
+                              <BarChart data={signalData} margin={{ top: 8, right: 8, left: -12, bottom: 30 }} barCategoryGap="30%">
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                                <XAxis dataKey="year" {...axX} interval={0} angle={-45} textAnchor="end" height={50} />
+                                <YAxis {...axY(v => `${v.toFixed(1)}Cr`)} />
+                                <Tooltip content={<CustomTooltip valueFormatter={v => `₹${v.toFixed(2)} Cr`} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                                <Bar dataKey="val" name="Signal Cashflow" fill={T.red} fillOpacity={0.75} stroke={T.red} strokeWidth={1} radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </ChartShell>
+
+                          <ChartShell title="Option B: Grade Separation" sub="Year 0: Construction costs, Rest Years: Benefits are comparitive with respect to Trafic Signal">
+                            <ResponsiveContainer width="100%" height={310}>
+                              <BarChart data={gradeData} margin={{ top: 8, right: 8, left: -12, bottom: 30 }} barCategoryGap="30%">
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                                <XAxis dataKey="year" {...axX} interval={0} angle={-45} textAnchor="end" height={50} />
+                                <YAxis {...axY(v => `${v.toFixed(1)}Cr`)} />
+                                <Tooltip content={<CustomTooltip valueFormatter={v => `₹${v.toFixed(2)} Cr`} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                                <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" />
+                                <Bar dataKey="val" name="Grade Cashflow" fill={T.green} fillOpacity={0.75} stroke={T.green} strokeWidth={1} radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </ChartShell>
                         </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                {/* 8A. BREAK EVEN METRICS */}
-                <div>
-                  <div className="result-section-label"><span className="num">8A</span> MAX ALLOWABLE BID COST</div>
-                  <div className="glass-card" style={{ padding: "40px 32px", display: "flex", flexDirection: "column", height: "calc(100% - 36px)" }}>
-                    <p style={{ fontSize: "13px", color: T.textSoft, marginBottom: "32px" }}>Financial ceiling defining exactly where specific infrastructure bids invert the viability theorem.</p>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "20px", marginTop: "auto" }}>
-                      <div>
-                        <div style={{ fontSize: "11px", color: T.textMuted, fontWeight: 800, letterSpacing: "1.5px", marginBottom: "8px" }}>CEILING THRESHOLD</div>
-                        <div className="metric-value" style={{ color: T.cyan }}>{fmtCr(result.economic.breakeven_c * 1e7)}</div>
                       </div>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                      <span style={{ fontSize: "11px", color: T.textMuted, fontWeight: 600 }}>0 Cr</span>
-                      <span style={{ fontSize: "11px", color: T.textSoft, fontWeight: 700 }}>PROPOSED: ₹{constructionCost} Cr</span>
-                    </div>
-                    <div style={{ height: "24px", background: "rgba(0,0,0,0.6)", borderRadius: "12px", position: "relative", border: `1px solid rgba(255,255,255,0.05)` }}>
-                      <div style={{
-                        position: "absolute", top: "2px", left: "2px", bottom: "2px",
-                        background: constructionCost < result.economic.breakeven_c ? T.gradGreen : T.gradRed,
-                        width: `calc(${Math.min(100, (constructionCost / result.economic.breakeven_c) * 100)}% - 4px)`,
-                        transition: "width 1s cubic-bezier(0.4, 0, 0.2, 1)",
-                        borderRadius: "10px"
-                      }} />
-                      {constructionCost <= result.economic.breakeven_c && (
-                        <div style={{ position: "absolute", top: "-6px", left: `${(constructionCost / result.economic.breakeven_c) * 100}%`, width: "4px", bottom: "-6px", background: "#fff", transform: "translateX(-4px)", zIndex: 2, borderRadius: "2px", boxShadow: "0 0 10px rgba(255,255,255,0.8)" }} />
-                      )}
-                      <div style={{ position: "absolute", top: "0", right: "0", width: "2px", height: "100%", background: T.border }} />
-                    </div>
+                    )}
+
+                    {/* ── NPV ────────────────────────────────────────────────── */}
+                    {tab === 'npv' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+                        <SectionLabel num="3">Incremental NPV & Annual Loss Composition</SectionLabel>
+
+                        <ChartShell title="A) Net Incremental Advantage (Option B - Option A)" sub="Above zero = Grade Separation preferred. Below = Signal is economically superior.">
+                          <ResponsiveContainer width="100%" height={370}>
+                            <BarChart data={incData} margin={{ top: 8, right: 8, left: -8, bottom: 30 }} barCategoryGap="30%">
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                              <XAxis dataKey="year" {...axX} interval={0} angle={-45} textAnchor="end" height={50} />
+                              <YAxis {...axY(v => `${v.toFixed(0)}Cr`)} />
+                              <Tooltip content={<CustomTooltip valueFormatter={v => `${v.toFixed(2)} Cr`} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                              <ReferenceLine y={0} stroke="rgba(255,255,255,0.25)" strokeWidth={1.5}
+                                label={{ position: 'insideTopLeft', value: 'BREAK-EVEN', fill: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: 700, dy: -8 }} />
+                              <Bar dataKey="val" name="Net Advantage" radius={[3, 3, 0, 0]}>
+                                {incData.map((entry, index) => (
+                                  <Cell
+                                    key={`cell-${index}`}
+                                    fill={entry.val >= 0 ? T.violet : T.red}
+                                    fillOpacity={0.75}
+                                    stroke={entry.val >= 0 ? T.violet : T.red}
+                                    strokeWidth={1}
+                                  />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </ChartShell>
+
+                        <ChartShell title="B) Annual Loss Composition" sub="Stacked signal-decay categories vs underpass maintenance over 30 years.">
+                          <ResponsiveContainer width="100%" height={400}>
+                            <BarChart data={chrt.comps_sampled} margin={{ top: 8, right: 8, left: -8, bottom: 30 }} barCategoryGap="28%">
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                              <XAxis dataKey="year" {...axX} interval={0} angle={-45} textAnchor="end" height={50} />
+                              <YAxis {...axY(v => `${v.toFixed(0)}Cr`)} />
+                              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
+                              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '16px', color: T.textSoft }} iconType="circle" iconSize={7} />
+                              <Bar dataKey="tvl" stackId="A" fill={T.chart[0]} name="Time Value" radius={[0, 0, 3, 3]} />
+                              <Bar dataKey="afc" stackId="A" fill={T.chart[1]} name="Fuel Loss" />
+                              <Bar dataKey="voc" stackId="A" fill={T.chart[2]} name="Vehicle Wear" />
+                              <Bar dataKey="carbon" stackId="A" fill={T.chart[3]} name="Carbon" radius={[3, 3, 0, 0]} />
+                              <Bar dataKey="maint_g" fill={T.cyan} name="Grade Maint." radius={[3, 3, 3, 3]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </ChartShell>
+                      </div>
+                    )}
+
+                    {/* ── SCENARIOS ──────────────────────────────────────────── */}
+                    {tab === 'scenario' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                        <SectionLabel num="5">30-Year NPV Horizon Scenarios</SectionLabel>
+
+                        {/* ── 3 equal scenario cards ── */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+                          {[
+                            {
+                              name: 'PESSIMISTIC', val: chrt.scenarios.pessimistic, color: T.red,
+                              icon: '↘', desc: 'Worst-case macro conditions',
+                              deltas: ['Traffic −2%', 'GDP −2%', 'DR +2%', 'Cost +20%'],
+                            },
+                            {
+                              name: 'BASE CASE', val: chrt.scenarios.base, color: T.violet,
+                              icon: '→', desc: 'Current inputs, no perturbation', active: true,
+                              deltas: ['As entered in sidebar'],
+                            },
+                            {
+                              name: 'OPTIMISTIC', val: chrt.scenarios.optimistic, color: T.green,
+                              icon: '↗', desc: 'Best-case macro conditions',
+                              deltas: ['Traffic +2%', 'GDP +2%', 'DR −2%', 'Cost −20%'],
+                            },
+                          ].map((s, i) => (
+                            <Card key={i} glow={s.active ? 'violet' : undefined}
+                              style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                              {/* Header */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: s.color, boxShadow: `0 0 8px ${s.color}80` }} />
+                                  <span style={{ fontSize: '10px', fontWeight: 800, color: s.active ? '#fff' : T.textSoft, letterSpacing: '1.5px' }}>{s.name}</span>
+                                </div>
+                                <span style={{ fontSize: '18px', color: s.color, fontWeight: 700 }}>{s.icon}</span>
+                              </div>
+
+                              {/* NPV value */}
+                              <div>
+                                <div style={{ fontFamily: T.mono, fontSize: '26px', fontWeight: 900, color: s.val > 0 ? T.green : T.red, letterSpacing: '-0.5px', lineHeight: 1 }}>
+                                  {fmtCr(s.val)}
+                                </div>
+                                <div style={{ fontSize: '10px', color: T.textMuted, marginTop: '4px' }}>Δ NPV (Grade Sep − Signal)</div>
+                              </div>
+
+                              {/* Desc */}
+                              <div style={{ fontSize: '11px', color: T.textSoft, lineHeight: 1.6 }}>{s.desc}</div>
+
+                              {/* Parameter deltas */}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: 'auto' }}>
+                                {s.deltas.map((d, j) => (
+                                  <span key={j} style={{
+                                    fontSize: '9px', fontWeight: 700, fontFamily: T.mono,
+                                    padding: '2px 7px', borderRadius: '4px',
+                                    background: `${s.color}18`, border: `1px solid ${s.color}40`,
+                                    color: s.color, letterSpacing: '0.3px',
+                                  }}>{d}</span>
+                                ))}
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+
+                        {/* ── Spectrum range bar ── */}
+                        <Card style={{ padding: '24px 28px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 700, color: T.textMuted, letterSpacing: '1px', marginBottom: '20px' }}>NPV OUTCOME SPECTRUM</div>
+                          {(() => {
+                            const vals = [chrt.scenarios.pessimistic, chrt.scenarios.base, chrt.scenarios.optimistic];
+                            const min = Math.min(...vals);
+                            const max = Math.max(...vals);
+                            const span = max - min || 1;
+                            const pct = (v) => ((v - min) / span) * 100;
+                            return (
+                              <>
+                                <div style={{ position: 'relative', height: '10px', background: `linear-gradient(90deg, ${T.red}66, ${T.violet}66, ${T.green}66)`, borderRadius: '6px', marginBottom: '28px' }}>
+                                  {[
+                                    { val: chrt.scenarios.pessimistic, color: T.red, label: 'Pessimistic' },
+                                    { val: chrt.scenarios.base, color: T.violet, label: 'Base' },
+                                    { val: chrt.scenarios.optimistic, color: T.green, label: 'Optimistic' },
+                                  ].map((m, i) => (
+                                    <div key={i} style={{ position: 'absolute', top: '50%', left: `${pct(m.val)}%`, transform: 'translate(-50%, -50%)' }}>
+                                      <div style={{ width: '14px', height: '14px', borderRadius: '50%', background: m.color, border: '2px solid rgba(255,255,255,0.8)', boxShadow: `0 0 10px ${m.color}` }} />
+                                      <div style={{ position: 'absolute', top: '18px', left: '50%', transform: 'translateX(-50%)', fontSize: '9px', fontWeight: 700, color: m.color, whiteSpace: 'nowrap', letterSpacing: '0.5px' }}>
+                                        {fmtCr(m.val)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: T.textMuted, marginTop: '8px' }}>
+                                  <span style={{ color: T.red }}>◀ Worst case</span>
+                                  <span style={{ color: T.textMuted }}>NPV spread: {fmtCr(max - min)}</span>
+                                  <span style={{ color: T.green }}>Best case ▶</span>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </Card>
+                      </div>
+                    )}
+
+                    {/* ── RISK & IRR ─────────────────────────────────────────── */}
+                    {tab === 'risk' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+                        <SectionLabel num="6">NPV Sensitivity Tornado (±20%)</SectionLabel>
+
+                        {/* ── Tornado + Spider 2-col grid ─────────────────── */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '20px' }}>
+
+                          {/* Tornado */}
+                          <Card style={{ padding: '28px' }}>
+                            <div style={{ fontSize: '16px', fontWeight: 700, color: T.text, marginBottom: '6px' }}>Tornado Chart</div>
+                            <p style={{ fontSize: '12px', color: T.textSoft, marginBottom: '24px', lineHeight: 1.7 }}>
+                              Each row shows NPV shift when a variable is varied ±20%, all others fixed. Wider = more sensitive.
+                            </p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                              {chrt.sensitivities.map((s, i) => {
+                                const lPct = Math.min(50, Math.abs(s.low_npv - eco.delta_npv) / sensMax * 50);
+                                const rPct = Math.min(50, Math.abs(s.high_npv - eco.delta_npv) / sensMax * 50);
+                                return (
+                                  <div key={i}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 700, marginBottom: '7px' }}>
+                                      <span style={{ fontFamily: T.mono, textTransform: 'uppercase', letterSpacing: '1px', color: T.text }}>{s.variable}</span>
+                                      <span style={{ color: T.textMuted }}>Spread: {fmtCr(s.spread)}</span>
+                                    </div>
+                                    <div style={{ height: '26px', display: 'flex', background: 'rgba(0,0,0,0.35)', borderRadius: '6px', overflow: 'hidden', border: `1px solid ${T.border}`, position: 'relative' }}>
+                                      <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: '2px', background: 'rgba(255,255,255,0.5)', transform: 'translateX(-1px)', zIndex: 2 }} />
+                                      <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', paddingRight: '2px' }}>
+                                        {lPct > 0 && <div style={{ height: '14px', width: `${lPct * 2}%`, background: `linear-gradient(270deg, ${T.red}, ${T.red}44)`, borderRadius: '3px 0 0 3px' }} />}
+                                      </div>
+                                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', paddingLeft: '2px' }}>
+                                        {rPct > 0 && <div style={{ height: '14px', width: `${rPct * 2}%`, background: `linear-gradient(90deg, ${T.green}, ${T.green}44)`, borderRadius: '0 3px 3px 0' }} />}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </Card>
+
+                          {/* Spider / Radar */}
+                          <Card style={{ padding: '28px' }}>
+                            <div style={{ fontSize: '16px', fontWeight: 700, color: T.text, marginBottom: '6px' }}>Spider Chart</div>
+                            <p style={{ fontSize: '12px', color: T.textSoft, marginBottom: '16px', lineHeight: 1.7 }}>
+                              Normalized sensitivity envelope (0–100). <span style={{ color: T.green }}>Green</span> = upside (+20%), <span style={{ color: T.red }}>Red</span> = downside (−20%).
+                            </p>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <RadarChart data={chrt.spider_data} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
+                                <PolarGrid stroke={T.border} />
+                                <PolarAngleAxis
+                                  dataKey="variable"
+                                  tick={{ fill: T.textSoft, fontSize: 10, fontFamily: T.mono, fontWeight: 700 }}
+                                />
+                                <PolarRadiusAxis
+                                  angle={90} domain={[0, 100]}
+                                  tick={{ fill: T.textMuted, fontSize: 9 }}
+                                  tickCount={4}
+                                  stroke="transparent"
+                                />
+                                <Radar name="Upside (+20%)"
+                                  dataKey="upside"
+                                  stroke={T.green} strokeWidth={2}
+                                  fill={T.green} fillOpacity={0.12}
+                                />
+                                <Radar name="Downside (−20%)"
+                                  dataKey="downside"
+                                  stroke={T.red} strokeWidth={2}
+                                  fill={T.red} fillOpacity={0.12}
+                                />
+                                <Legend
+                                  wrapperStyle={{ fontSize: '11px', paddingTop: '12px', color: T.textSoft }}
+                                  iconType="circle" iconSize={7}
+                                />
+                                <Tooltip
+                                  content={({ active, payload, label }) => {
+                                    if (!active || !payload?.length) return null;
+                                    return (
+                                      <div style={{ background: 'rgba(7,7,10,0.97)', border: `1px solid ${T.border}`, borderRadius: '10px', padding: '10px 14px', minWidth: '160px' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: 700, color: T.textMuted, marginBottom: '8px', letterSpacing: '1px' }}>{label}</div>
+                                        {payload.map((e, i) => (
+                                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '12px', marginBottom: '3px' }}>
+                                            <span style={{ color: e.color }}>{e.name}</span>
+                                            <span style={{ fontFamily: T.mono, fontWeight: 700, color: T.text }}>{e.value.toFixed(1)}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  }}
+                                />
+                              </RadarChart>
+                            </ResponsiveContainer>
+                          </Card>
+                        </div>
+
+                        <SectionLabel num="7">Internal Rate of Return vs Discount Rate</SectionLabel>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                          <MetricCard icon="📊" label="Project IRR" value={fmt2(eco.irr)} unit="%" color={eco.irr > discount ? T.green : T.red}
+                            sub={eco.irr > discount ? `+${(eco.irr - discount).toFixed(2)}pp above Discount Rate` : `${(discount - eco.irr).toFixed(2)}pp below Discount Rate`} />
+                          <MetricCard icon="🏦" label="Discount Rate" value={discount} unit="%" color={T.cyan} />
+                          <MetricCard icon="📐" label="Δ NPV" value={fmtCr(eco.delta_npv)} color={eco.delta_npv > 0 ? T.green : T.red} />
+                        </div>
+
+                        <Card style={{ padding: '24px 28px' }}>
+                          {(() => {
+                            const cap = Math.max(60, (eco.irr ?? 0) * 1.25);
+                            const hp = (discount / cap) * 100;
+                            const ip = ((eco.irr ?? 0) / cap) * 100;
+                            return (
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
+                                  <div style={{ fontSize: '11px', fontWeight: 700, color: T.textMuted, letterSpacing: '1px' }}>IRR GAUGE</div>
+                                  <div style={{ fontSize: '11px', color: T.textSoft }}>Discount Rate {discount}% / IRR {fmt2(eco.irr)}%</div>
+                                </div>
+                                <div style={{ position: 'relative', height: '18px' }}>
+                                  <ProgressBar pct={ip} color={eco.irr > discount ? T.green : T.red} h={18} />
+                                  <div style={{ position: 'absolute', top: '-4px', bottom: '-4px', left: `${hp}%`, width: '3px', background: '#fff', borderRadius: '2px', boxShadow: '0 0 8px rgba(255,255,255,0.8)' }} />
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: T.textMuted, marginTop: '6px' }}>
+                                  <span>0%</span><span style={{ color: T.text }}>Discount Rate {discount}%</span><span>{cap.toFixed(0)}%</span>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </Card>
+                      </div>
+                    )}
+
+                    {/* ── PAYBACK ───────────────────────────────────────────── */}
+                    {tab === 'payback' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+                        <SectionLabel num="8A">Capital Break-Even Threshold</SectionLabel>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                          <MetricCard icon="🏗️" label="Max Justifiable Build" value={fmtCr(eco.breakeven_c * 1e7)} color={T.cyan} sub="Ceiling beyond which Signal becomes preferable" />
+                          <MetricCard icon="💰" label="Entered Budget" value={`₹${buildCost} Cr`} color={buildCost < eco.breakeven_c ? T.green : T.red} sub={buildCost < eco.breakeven_c ? 'Under breakeven ✓' : 'Over breakeven ⚠️'} />
+                          <MetricCard icon="🎯" label="Payback Year" value={eco.payback ?? 'N/A'} unit={eco.payback ? 'yr' : ''} color={T.amber} sub="Year cumulative NPV crosses zero" />
+                        </div>
+
+                        <Card style={{ padding: '24px 28px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 700, color: T.textMuted, letterSpacing: '1px' }}>BUDGET vs BREAKEVEN</div>
+                            <div style={{ fontSize: '11px', color: T.textSoft }}>₹{buildCost} Cr / {fmtCr(eco.breakeven_c * 1e7)}</div>
+                          </div>
+                          <div style={{ position: 'relative', height: '18px' }}>
+                            <ProgressBar pct={(buildCost / (eco.breakeven_c * 1.3)) * 100} color={buildCost < eco.breakeven_c ? T.green : T.red} h={18} />
+                            <div style={{
+                              position: 'absolute', top: '-4px', bottom: '-4px',
+                              left: `${Math.min(100, (buildCost / (eco.breakeven_c * 1.3)) * 100)}%`,
+                              width: '3px', background: '#fff', borderRadius: '2px', boxShadow: '0 0 8px rgba(255,255,255,0.8)',
+                            }} />
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: T.textMuted, marginTop: '6px' }}>
+                            <span>₹0</span><span style={{ color: T.cyan }}>Breakeven {fmtCr(eco.breakeven_c * 1e7)}</span><span>{fmtCr(eco.breakeven_c * 1.3e7)}</span>
+                          </div>
+                        </Card>
+
+                        <SectionLabel num="8B">Cumulative Payback Trace</SectionLabel>
+                        <ChartShell title="Payback Analysis" sub="Cumulative discounted cash position. Amber vertical = formal payback horizon (zero-line intercept).">
+                          <ResponsiveContainer width="100%" height={380}>
+                            <ComposedChart data={incData} margin={{ top: 28, right: 12, left: -8, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                              <XAxis dataKey="year" {...axX} />
+                              <YAxis {...axY(v => `${v.toFixed(0)}Cr`)} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" strokeWidth={1.5}
+                                label={{ position: 'insideTopLeft', value: 'NET ZERO', fill: T.textMuted, fontSize: 10, fontWeight: 700, dy: -10 }} />
+                              {eco.payback && (
+                                <ReferenceLine x={eco.payback} stroke={T.amber} strokeWidth={2} strokeDasharray="6 4"
+                                  label={{ position: 'top', value: `PAYBACK YR ${eco.payback}`, fill: T.amber, fontSize: 11, fontWeight: 800 }} />
+                              )}
+                              <Line type="monotone" dataKey="val" name="Capital Position" stroke={T.amber} strokeWidth={2.5}
+                                dot={{ r: 2.5, fill: T.bg, stroke: T.amber, strokeWidth: 2 }}
+                                activeDot={{ r: 7, fill: T.bg, stroke: T.amber, strokeWidth: 2.5 }}
+                              />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </ChartShell>
+                      </div>
+                    )}
+
                   </div>
                 </div>
-
-                {/* 8B. PAYBACK TRACE */}
-                <div style={{ gridColumn: "1 / -1", marginBottom: "64px" }}>
-                  <div className="result-section-label"><span className="num">8B</span> LINEAR PAYBACK TRACE</div>
-                  <div className="glass-card" style={{ padding: "32px 32px 40px 32px" }}>
-                    <p style={{ fontSize: "13px", color: T.textSoft, marginBottom: "40px" }}>Pinpoints the timeline threshold where net socio-economic capacity completely recoups structural upfront execution capital bounds.</p>
-                    <ResponsiveContainer width="100%" height={400}>
-                      <ComposedChart data={result.charts.comps_sampled.map((c, i) => ({ year: c.year, val: result.charts.inc_cumulative[i] }))} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke={"rgba(255,255,255,0.03)"} vertical={false} />
-                        <XAxis dataKey="year" tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} dy={10} name="Year" />
-                        <YAxis tick={{ fill: T.textMuted, fontSize: 11, fontFamily: T.mono }} axisLine={false} tickLine={false} width={80} tickFormatter={(v) => `₹${v.toFixed(0)}C`} />
-                        <Tooltip content={<CustomTooltip />} />
-
-                        <ReferenceLine y={0} stroke={T.text} strokeWidth={2} opacity={0.3} label={{ position: 'insideTopLeft', value: 'NET ZERO HORIZON', fill: T.textMuted, fontSize: 11, fontWeight: 700, dy: -10 }} />
-
-                        {result.economic.payback && <ReferenceLine x={result.economic.payback} stroke={T.amber} strokeWidth={2} strokeDasharray="5 5" label={{ position: 'top', value: `PAYBACK HORIZON: YR ${result.economic.payback}`, fill: T.amber, fontSize: 12, fontWeight: 800 }} />}
-
-                        <Line type="monotone" dataKey="val" name="Capital Position" stroke={T.amber} strokeWidth={3} activeDot={{ r: 8, fill: T.bg, stroke: T.amber, strokeWidth: 3 }} dot={{ r: 4, fill: T.bg, stroke: T.amber, strokeWidth: 2 }} style={{ filter: `drop-shadow(0 4px 8px rgba(245,158,11,0.2))` }} />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
               </div>
-            </div>
-          )}
+            );
+          })()}
         </main>
       </div>
     </>
