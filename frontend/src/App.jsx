@@ -293,14 +293,51 @@ export default function App() {
         @keyframes pulse2{0%,100%{opacity:1}50%{opacity:.35}}
         .pulse{animation:pulse2 2s ease-in-out infinite}
         button{font-family:inherit;cursor:pointer}
+
+        .app-layout {
+          display: flex;
+          height: 100dvh;
+          width: 100%;
+          overflow: hidden;
+          flex-direction: row;
+        }
+        .app-sidebar {
+          flex-shrink: 0;
+          width: 450px;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+        }
+        @media (max-width: 900px) {
+          html, body {
+            overflow-y: auto !important;
+            height: auto !important;
+          }
+          .app-layout {
+            flex-direction: column;
+            height: auto;
+            overflow-y: visible;
+          }
+          .app-sidebar {
+            width: 100%;
+            height: auto;
+            border-right: none;
+            border-bottom: 2px solid ${T.border};
+          }
+          .sidebar-form-scroll {
+            overflow: visible !important;
+            flex: none !important;
+          }
+          .app-main {
+            overflow: visible !important;
+          }
+        }
       `}</style>
 
-      <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden' }}>
+      <div className="app-layout">
 
         {/* ══ SIDEBAR ══════════════════════════════════════════════════════════ */}
-        <aside style={{
-          flexShrink: 0, width: '425px', height: '100%',
-          display: 'flex', flexDirection: 'column',
+        <aside className="app-sidebar" style={{
           backgroundColor: T.sidebar,
           backgroundImage: `radial-gradient(${T.dotPattern} 1px, transparent 1px)`,
           backgroundSize: '22px 22px',
@@ -384,7 +421,7 @@ export default function App() {
           </div>
 
           {/* Scrollable form */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 16px 0' }}>
+          <div className="sidebar-form-scroll" style={{ flex: 1, overflowY: 'auto', padding: '4px 16px 0' }}>
 
             <GroupHead>🚧 Traffic Model</GroupHead>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -472,7 +509,7 @@ export default function App() {
         </aside>
 
         {/* ══ MAIN ═════════════════════════════════════════════════════════════ */}
-        <main ref={mainRef} style={{
+        <main className="app-main" ref={mainRef} style={{
           flex: 1, minWidth: 0, height: '100%',
           overflowY: 'auto', overflowX: 'hidden',
           backgroundColor: T.bg,
