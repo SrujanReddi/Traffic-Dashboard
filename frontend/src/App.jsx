@@ -7,6 +7,24 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts';
 
+/* ─── Maintenance ─────────────────────────────────────────────────────── */
+const MAINTENANCE = true;
+
+if (MAINTENANCE) {
+  return (
+    <div style={{
+      height: "100vh",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      fontSize: "24px",
+      fontWeight: "bold"
+    }}>
+      🚧 Site under maintenance 🚧
+    </div>
+  );
+}
+
 /* ─── Theme definitions ─────────────────────────────────────────────────────── */
 const darkTheme = {
   bg: '#07070a', sidebar: '#0d0d12', card: 'rgba(18,18,24,0.8)',
