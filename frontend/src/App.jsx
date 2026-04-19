@@ -10,21 +10,6 @@ import {
 /* ─── Maintenance ─────────────────────────────────────────────────────── */
 const MAINTENANCE = true;
 
-if (MAINTENANCE) {
-  return (
-    <div style={{
-      height: "100vh",
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      fontSize: "24px",
-      fontWeight: "bold"
-    }}>
-      🚧 Site under maintenance 🚧
-    </div>
-  );
-}
-
 /* ─── Theme definitions ─────────────────────────────────────────────────────── */
 const darkTheme = {
   bg: '#07070a', sidebar: '#0d0d12', card: 'rgba(18,18,24,0.8)',
@@ -292,6 +277,21 @@ export default function App() {
   const isGS = eco?.delta_npv > 0 || web?.is_saturated;
   const hColor = isGS ? T.green : T.amber;
 
+  
+  if (MAINTENANCE) {
+    return (
+      <div style={{
+        height: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        fontSize: "24px",
+        fontWeight: "bold"
+      }}>
+        🚧 Site under maintenance 🚧
+      </div>
+    );
+  }
   return (
     <>
       <style>{`
