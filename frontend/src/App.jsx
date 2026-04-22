@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 
 /* ─── Maintenance ─────────────────────────────────────────────────────── */
-const MAINTENANCE = true;
+const MAINTENANCE = false;
 
 /* ─── Theme definitions ─────────────────────────────────────────────────────── */
 const darkTheme = {
