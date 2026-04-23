@@ -11,6 +11,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# --- GDP Growth Variability Schedule ---
+BASE_YEAR = 2025
+GDP_SCHED = [
+    (2022, 2025, 0.082),
+    (2026, 2030, 0.059),
+    (2031, 2035, 0.047),
+    (2036, 2040, 0.038),
+    (2041, 2045, 0.031),
+    (2046, 2050, 0.027),
+    (2051, 2055, 0.024),
+    (2056, 2060, 0.023),
+]
+
+def gdp_rate_for_year(calendar_year: int) -> float:
+    for y_start, y_end, rate in GDP_SCHED:
+        if y_start <= calendar_year <= y_end:
+            return rate
+    return GDP_SCHED[-1][2]
+
+def precompute_gdp_factors(num_years: int, base_year: int, shift: float = 0.0) -> list:
+    """Cumulative GDP-per-capita growth factors. f[0]=1.0, f[t]=Product(1+rate_i) for i=1..t"""
+    f = [1.0]
+    for t in range(1, num_years + 1):
+        rate = max(0.0, gdp_rate_for_year(base_year + t) + shift)
+        f.append(f[-1] * (1 + rate))
+    return f
+
 # --- Webster's Calculations (Part 3) ---
 def calculate_webster_design(phases: List[Dict], num_phases: int):
     L_per_phase = 4.0
@@ -79,7 +106,8 @@ def run_economic_analysis(
     r_d = params["discount_rate"] / 100
     r_g = params["traffic_growth"] / 100
     r_inf = params["inflation_rate"] / 100
-    r_gdp = params["gdp_growth"] / 100
+    _gdp_shift = params.get("gdp_shift", 0.0)
+    _gdp_factors = precompute_gdp_factors(years, BASE_YEAR, _gdp_shift)
     
     gdppc_0 = (params["gdp_crores"] * 1e7) / params["population"]
     gdppc_sec_0 = gdppc_0 / (365 * 24 * 3600)
@@ -118,7 +146,7 @@ def run_economic_analysis(
         v_h_t_capped = min(v_h_t, signal_capacity)
         v_year_t = v_h_t_capped * op_hours * 365
         
-        gdppc_sec_t = gdppc_sec_0 * (1 + r_gdp)**t
+        gdppc_sec_t = gdppc_sec_0 * _gdp_factors[t]
         f_t = f_0 * (1 + r_inf)**t
         
         tvl_t = v_year_t * d_avg * params["occupancy"] * gdppc_sec_t
@@ -246,14 +274,14 @@ def analyze(data: dict):
         # Scenario Analysis
         pessimistic_params = params.copy()
         pessimistic_params["traffic_growth"] = max(0, traffic_growth - 2)
-        pessimistic_params["gdp_growth"] = max(0, gdp_growth - 2)
+        pessimistic_params["gdp_shift"] = -0.02   # −2pp shift to all scheduled GDP rates
         pessimistic_params["discount_rate"] = discount_rate + 2
         pessimistic_params["grade_sep_construction_cost_crores"] = grade_sep_construction_cost_crores * 1.2
         res_pes = run_economic_analysis(total_volume, webster["avg_delay"], pessimistic_params, webster)
         
         optimistic_params = params.copy()
         optimistic_params["traffic_growth"] = traffic_growth + 2
-        optimistic_params["gdp_growth"] = gdp_growth + 2
+        optimistic_params["gdp_shift"] = +0.02    # +2pp shift to all scheduled GDP rates
         optimistic_params["discount_rate"] = max(1, discount_rate - 2)
         optimistic_params["grade_sep_construction_cost_crores"] = grade_sep_construction_cost_crores * 0.8
         res_opt = run_economic_analysis(total_volume, webster["avg_delay"], optimistic_params, webster)
@@ -279,12 +307,14 @@ def analyze(data: dict):
             new_params_low = params.copy()
             new_v_low = total_volume
             if var_name == "total_volume": new_v_low *= 0.8
+            elif var_name == "gdp_growth": new_params_low["gdp_shift"] = -0.02
             else: new_params_low[var_name] *= 0.8
             res_low = run_economic_analysis(new_v_low, webster["avg_delay"], new_params_low, webster)
             
             new_params_high = params.copy()
             new_v_high = total_volume
             if var_name == "total_volume": new_v_high *= 1.2
+            elif var_name == "gdp_growth": new_params_high["gdp_shift"] = +0.02
             else: new_params_high[var_name] *= 1.2
             res_high = run_economic_analysis(new_v_high, webster["avg_delay"], new_params_high, webster)
             
@@ -355,6 +385,14 @@ def analyze(data: dict):
             "sensitivities": sensitivities,
             "breakeven_cost": breakeven_c,
             "scenarios": scenarios,
+            "gdp_variability": [
+                {
+                    "year": t,
+                    "calendar_year": BASE_YEAR + t,
+                    "rate": round(gdp_rate_for_year(BASE_YEAR + t) * 100, 1),
+                }
+                for t in range(0, 31)
+            ],
             "spider_data": [
                 {
                     "variable": s["variable"],
