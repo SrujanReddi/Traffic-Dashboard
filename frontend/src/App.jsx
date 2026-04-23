@@ -36,7 +36,7 @@ const lightTheme = {
   sidebarShadow: '4px 0 24px rgba(0,0,0,0.15)',
 };
 // Mutable — Object.assign'd on toggle so all component renders pick up new values
-const T = { ...darkTheme };
+const T = { ...lightTheme };
 
 const fmtCr = (n) => n == null ? '—' : `₹${(n / 1e7).toFixed(2)} Cr`;
 const fmt2 = (n) => typeof n === 'number' ? n.toFixed(2) : '—';
@@ -207,7 +207,31 @@ const TABS = [
   { id: 'scenario', label: 'SCENARIOS', icon: '4.' },
   { id: 'risk', label: 'SENSITIVITY & IRR', icon: '5.' },
   { id: 'payback', label: 'PAYBACK', icon: '6.' },
+  { id: 'variability', label: 'VARIABILITY-GDP', icon: '7.' },
 ];
+
+/* ─── GDP Variability Schedule (frontend mirror) ────────────────────────────── */
+const GDP_SCHED_FE = [
+  { from: 2022, to: 2025, rate: 8.2, label: '2022–2025', band: 'Historical', color: '#64748b' },
+  { from: 2026, to: 2030, rate: 5.9, label: '2026–2030', band: 'Yr 1–5', color: '#10b981' },
+  { from: 2031, to: 2035, rate: 4.7, label: '2031–2035', band: 'Yr 6–10', color: '#22d3ee' },
+  { from: 2036, to: 2040, rate: 3.8, label: '2036–2040', band: 'Yr 11–15', color: '#a78bfa' },
+  { from: 2041, to: 2045, rate: 3.1, label: '2041–2045', band: 'Yr 16–20', color: '#fbbf24' },
+  { from: 2046, to: 2050, rate: 2.7, label: '2046–2050', band: 'Yr 21–25', color: '#f59e0b' },
+  { from: 2051, to: 2055, rate: 2.4, label: '2051–2055', band: 'Yr 26–30', color: '#f43f5e' },
+  { from: 2056, to: 2060, rate: 2.3, label: '2056–2060', band: 'Post-30yr', color: '#9f1239' },
+];
+const gdpFeRate = (y) => (GDP_SCHED_FE.find(s => y >= s.from && y <= s.to) ?? GDP_SCHED_FE.at(-1)).rate;
+const GDP_CHART_DATA = (() => {
+  const d = []; let cum = 1.0;
+  for (let t = 0; t <= 30; t++) {
+    const calYear = 2025 + t;
+    const rate = gdpFeRate(calYear);
+    if (t > 0) cum *= (1 + rate / 100);
+    d.push({ year: t, calYear, rate, cumulative: parseFloat(cum.toFixed(3)) });
+  }
+  return d;
+})();
 
 /* ─── APP ───────────────────────────────────────────────────────────────────── */
 export default function App() {
@@ -221,7 +245,7 @@ export default function App() {
   const [inflation, setInflation] = useState(6.0);
   const [discount, setDiscount] = useState(10.0);
   const [trafGrowth, setTrafGrowth] = useState(5.0);
-  const [gdpGrowth, setGdpGrowth] = useState(6.0);
+  // gdpGrowth removed — backend uses the variability schedule (see Tab 7)
   const [idleFuel, setIdleFuel] = useState(0.7);
   const [voc, setVoc] = useState(3.0);
   const [carbon, setCarbon] = useState(1.5);
@@ -229,7 +253,7 @@ export default function App() {
   const [sigMaint, setSigMaint] = useState(200000);
   const [buildCost, setBuildCost] = useState(50.0);
   const [gradeMaint, setGradeMaint] = useState(250000);
-  const [isDark, setIsDark] = useState(true);
+  const [isDark, setIsDark] = useState(false);
   const toggleTheme = () => {
     const next = isDark ? lightTheme : darkTheme;
     Object.assign(T, next);
@@ -262,7 +286,7 @@ export default function App() {
         phases: phaseData.map(p => ({ critical_volume: p.criticalVolume, lanes: p.lanes })),
         total_volume: totalVol, occupancy, gdp, population,
         fuel_cost: fuelCost, inflation_rate: inflation, discount_rate: discount,
-        traffic_growth: trafGrowth, gdp_growth: gdpGrowth,
+        traffic_growth: trafGrowth,
         fuel_consumption_idle: idleFuel, voc_per_km: voc, carbon_cost: carbon,
         signal_install_cost: sigInstall, signal_maint_annual: sigMaint, construction_cost: buildCost,
         grade_sep_maint_annual: gradeMaint,
@@ -486,7 +510,7 @@ export default function App() {
               <FieldGroup label="City GDP (₹ Cr)" value={gdp} onChange={setGdp} full />
               <FieldGroup label="Population" value={population} onChange={setPopulation} />
               <FieldGroup label="Discount Rate %" value={discount} onChange={setDiscount} step="0.1" />
-              <FieldGroup label="GDP Growth %" value={gdpGrowth} onChange={setGdpGrowth} step="0.1" />
+
               <FieldGroup label="Inflation %" value={inflation} onChange={setInflation} step="0.1" />
               <FieldGroup label="Fuel (₹/L)" value={fuelCost} onChange={setFuelCost} />
               <FieldGroup label="Idle (L/h)" value={idleFuel} onChange={setIdleFuel} step="0.1" />
@@ -542,14 +566,14 @@ export default function App() {
           {/* ── Empty state ─────────────────────────────────────────────────── */}
           {!result && !loading && (
             <div className="fu" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 32px', textAlign: 'center' }}>
-              <div style={{ fontSize: '80px', marginBottom: '24px', opacity: 0.08, lineHeight: 1 }}>◈</div>
-              <h2 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '10px' }}>Workspace Ready</h2>
+              <div style={{ fontSize: '80px', marginBottom: '24px', opacity: 0.15, lineHeight: 1, color: T.text }}>◈</div>
+              <h2 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '10px', color: T.text }}>Workspace Ready</h2>
               <p style={{ fontSize: '13px', color: T.textMuted, maxWidth: '360px', lineHeight: 1.7, marginBottom: '32px' }}>
                 Configure your intersection parameters on the left and run the 30-year lifecycle computation.
               </p>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
                 {["Webster's Method", "NPV Analysis", "IRR Modeling", "Sensitivity Tests", "Scenario Planning"].map(t => (
-                  <div key={t} style={{ padding: '5px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.04)', border: `1px solid ${T.border}`, fontSize: '11px', color: T.textMuted }}>{t}</div>
+                  <div key={t} style={{ padding: '5px 12px', borderRadius: '6px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${T.border}`, fontSize: '11px', color: T.textMuted }}>{t}</div>
                 ))}
               </div>
             </div>
@@ -732,7 +756,7 @@ export default function App() {
                             </ResponsiveContainer>
                           </ChartShell>
 
-                          <ChartShell title="Option B: Grade Separation" sub="Year 0: Construction costs, Rest Years: Benefits are comparitive with respect to Trafic Signal">
+                          <ChartShell title="Option B: Grade Separation (Benefits are comparitive with respect to Trafic Signal)" sub="Year 0: Construction costs, Rest Years: Benefits are comparitive with respect to Trafic Signal">
                             <ResponsiveContainer width="100%" height={310}>
                               <BarChart data={gradeData} margin={{ top: 8, right: 8, left: -12, bottom: 30 }} barCategoryGap="30%">
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
@@ -1069,6 +1093,120 @@ export default function App() {
                             </ComposedChart>
                           </ResponsiveContainer>
                         </ChartShell>
+                      </div>
+                    )}
+
+                    {/* ══ 7. VARIABILITY TAB ══════════════════════════════════ */}
+                    {tab === 'variability' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+
+                        <SectionLabel num="7">GDP Growth Rate Variability — 30-Year Lifecycle Window</SectionLabel>
+
+                        {/* Info banner */}
+                        <Card style={{ padding: '18px 24px', display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                          <span style={{ fontSize: '28px', flexShrink: 0 }}>📉</span>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: T.text, marginBottom: '6px' }}>
+                              Variable GDP Growth Applied to Lifecycle Analysis
+                            </div>
+                            <div style={{ fontSize: '12px', color: T.textSoft, lineHeight: 1.8 }}>
+                              Instead of a single constant GDP growth rate, the model uses OECD projected
+                              growth rates segmented by period.
+                            </div>
+                          </div>
+                        </Card>
+
+                        {/* Period table */}
+                        <Card style={{ padding: '0', overflow: 'hidden' }}>
+                          <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}` }}>
+                            <div style={{ fontSize: '10px', fontWeight: 700, color: T.textMuted, letterSpacing: '1.2px', textTransform: 'uppercase' }}>Scheduled GDP Growth Rates</div>
+                          </div>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: T.phaseTableBg }}>
+                                {['Period', 'Calendar Years', 'GDP Growth Rate', 'Analysis Window', 'Rate (relative)'].map(h => (
+                                  <th key={h} style={{ padding: '10px 20px', fontSize: '10px', fontWeight: 700, color: T.textMuted, letterSpacing: '0.8px', textAlign: 'left', textTransform: 'uppercase', borderBottom: `1px solid ${T.border}` }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {GDP_SCHED_FE.map((s, i) => (
+                                <tr key={i} style={{ borderTop: i > 0 ? `1px solid ${T.border}` : 'none' }}>
+                                  <td style={{ padding: '12px 20px', fontSize: '13px', fontWeight: 800, color: s.color, fontFamily: T.mono }}>{s.label}</td>
+                                  <td style={{ padding: '12px 20px', fontSize: '12px', color: T.textSoft, fontFamily: T.mono }}>{s.from} – {s.to}</td>
+                                  <td style={{ padding: '12px 20px' }}>
+                                    <span style={{ fontSize: '22px', fontWeight: 900, fontFamily: T.mono, color: s.color }}>{s.rate}%</span>
+                                  </td>
+                                  <td style={{ padding: '12px 20px' }}>
+                                    <span style={{
+                                      fontSize: '11px', fontWeight: 700, color: s.band === 'Historical' ? T.textMuted : T.textSoft, fontFamily: T.mono,
+                                      background: s.band === 'Historical' ? T.phaseTableBg : `${s.color}14`,
+                                      border: `1px solid ${s.band === 'Historical' ? T.border : s.color + '44'}`,
+                                      borderRadius: '5px', padding: '3px 8px'
+                                    }}>{s.band}</span>
+                                  </td>
+                                  <td style={{ padding: '12px 20px', width: '200px' }}>
+                                    <div style={{ height: '7px', background: T.progressTrack, borderRadius: '4px', overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${(s.rate / 8.2) * 100}%`, background: s.color, borderRadius: '4px', transition: 'width 0.8s ease', boxShadow: `0 0 6px ${s.color}60` }} />
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </Card>
+
+                        {/* Charts */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                          <ChartShell title="GDP Growth Rate Trajectory" sub="Scheduled rate per analysis year — 30-year window (Yr 0 = 2025, Yr 30 = 2055)">
+                            <ResponsiveContainer width="100%" height={280}>
+                              <ComposedChart data={GDP_CHART_DATA} margin={{ top: 8, right: 10, left: -8, bottom: 8 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false} />
+                                <XAxis dataKey="year" {...axX()} />
+                                <YAxis {...axY(v => `${v}%`)} domain={[0, 10]} />
+                                <Tooltip content={<CustomTooltip valueFormatter={v => `${v.toFixed(1)}%`} />} />
+                                <Area type="stepAfter" dataKey="rate" name="GDP Growth Rate"
+                                  fill={`${T.violet}20`} stroke={T.violet} strokeWidth={2.5} dot={false} />
+                              </ComposedChart>
+                            </ResponsiveContainer>
+                          </ChartShell>
+
+                          <ChartShell title="Cumulative GDP-per-Capita Multiplier" sub="How much the value of travel-time loss compounds over the lifecycle (1.0 = base at Yr 0)">
+                            <ResponsiveContainer width="100%" height={280}>
+                              <AreaChart data={GDP_CHART_DATA} margin={{ top: 8, right: 10, left: -8, bottom: 8 }}>
+                                <defs>
+                                  <linearGradient id="gdpCumGrad" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={T.green} stopOpacity={0.35} />
+                                    <stop offset="100%" stopColor={T.green} stopOpacity={0.02} />
+                                  </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false} />
+                                <XAxis dataKey="year" {...axX()} />
+                                <YAxis {...axY(v => `${v.toFixed(1)}×`)} />
+                                <Tooltip content={<CustomTooltip valueFormatter={v => `${v.toFixed(3)}×`} />} />
+                                <Area type="monotone" dataKey="cumulative" name="Multiplier"
+                                  fill="url(#gdpCumGrad)" stroke={T.green} strokeWidth={2.5} dot={false} />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </ChartShell>
+                        </div>
+
+                        {/* KPI stat cards */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                          {[
+                            { label: 'Initial GDP Rate (Yr 1–5)', value: '5.9%', color: '#10b981', desc: '2026–2030 growth band' },
+                            { label: 'Final GDP Rate (Yr 26–30)', value: '2.4%', color: '#f43f5e', desc: '2051–2055 growth band' },
+                            { label: 'Cumulative Factor (30yr)', value: `${GDP_CHART_DATA[30].cumulative}×`, color: T.violet, desc: 'GDP-per-capita multiplier at Year 30' },
+                            { label: 'Effective GDP Rate', value: `${((Math.pow(GDP_CHART_DATA[30].cumulative, 1 / 30) - 1) * 100).toFixed(2)}%`, color: T.cyan, desc: 'Effective compound rate over 30 years' },
+                          ].map((s, i) => (
+                            <Card key={i} style={{ padding: '18px 22px' }}>
+                              <div style={{ fontSize: '10px', fontWeight: 700, color: T.textMuted, letterSpacing: '1.2px', textTransform: 'uppercase', marginBottom: '10px' }}>{s.label}</div>
+                              <div style={{ fontSize: '30px', fontWeight: 900, color: s.color, fontFamily: T.mono, letterSpacing: '-1px', marginBottom: '6px' }}>{s.value}</div>
+                              <div style={{ fontSize: '11px', color: T.textSoft }}>{s.desc}</div>
+                            </Card>
+                          ))}
+                        </div>
+
                       </div>
                     )}
 
