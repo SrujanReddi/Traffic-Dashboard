@@ -257,7 +257,7 @@ export default function App() {
   const run = async () => {
     setLoading(true); setError(null);
     try {
-      const { data } = await axios.post('http://127.0.0.1:8000/analyze', {
+      const { data } = await axios.post('https://traffic-dashboard-pqlh.onrender.com/analyze', {
         num_phases: numPhases,
         phases: phaseData.map(p => ({ critical_volume: p.criticalVolume, lanes: p.lanes })),
         total_volume: totalVol, occupancy, gdp, population,
