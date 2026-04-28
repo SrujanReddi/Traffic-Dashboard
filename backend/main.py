@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException
 from typing import Dict, List, Any, Optional
 import math
 import numpy as np
+import csv
+import os
 app = FastAPI(title="Traffic Signal vs. Grade Separation Decision Support System", version="4.0")
 app.add_middleware(
     CORSMiddleware,
@@ -11,6 +13,110 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── Load Tier CSV files at startup ───────────────────────────────────────────
+def _load_tier_csv(filename: str) -> Dict[int, Dict[str, float]]:
+    """Returns {year: {mean, stddev, min, max}} with rates as fractions (÷100)."""
+    data = {}
+    path = os.path.join(os.path.dirname(__file__), filename)
+    with open(path, newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            yr = int(row['Year'])
+            data[yr] = {
+                'mean':   float(row['Mean'])   / 100,
+                'stddev': float(row['StdDev']) / 100,
+                'min':    float(row['Min'])    / 100,
+                'max':    float(row['Max'])    / 100,
+            }
+    return data
+
+TIER1_DATA = _load_tier_csv('tier1.csv')  # population > 4M
+TIER2_DATA = _load_tier_csv('tier2.csv')  # 1M ≤ population ≤ 4M
+TIER3_DATA = _load_tier_csv('tier3.csv')  # population < 1M
+
+def get_tier(pop_2011: float) -> Dict[int, Dict[str, float]]:
+    """Select the correct CSV data based on 2011 census population."""
+    if pop_2011 > 4_000_000:
+        return TIER1_DATA
+    elif pop_2011 >= 1_000_000:
+        return TIER2_DATA
+    else:
+        return TIER3_DATA
+
+def project_population(pop_2011: float, tier_data: Dict, from_year: int, to_year: int,
+                        scenario: str = 'mean') -> float:
+    """
+    Compound-grow pop_2011 from from_year to to_year using per-year rates.
+    scenario: 'mean' | 'mean_minus_std' | 'mean_plus_std' | 'min' | 'max'
+    """
+    pop = pop_2011
+    for yr in range(from_year + 1, to_year + 1):
+        row = tier_data.get(yr)
+        if row is None:
+            row = tier_data[max(tier_data.keys())]  # extrapolate with last row
+        if scenario == 'mean':
+            rate = row['mean']
+        elif scenario == 'mean_minus_std':
+            rate = row['mean'] - row['stddev']
+        elif scenario == 'mean_plus_std':
+            rate = row['mean'] + row['stddev']
+        elif scenario == 'min':
+            rate = row['min']
+        elif scenario == 'max':
+            rate = row['max']
+        else:
+            rate = row['mean']
+        pop = pop * (1 + rate)
+    return pop
+
+def compute_pop_variability_scenarios(
+    pop_2011: float,
+    tier_data: Dict,
+    base_params: Dict,
+    total_volume: float,
+    d_avg: float,
+    webster_results: Dict,
+) -> List[Dict]:
+    """
+    For each of the 5 scenarios, project pop 2011→2026 using that scenario's
+    per-year rates, then run the full 30-year NPV analysis with that population
+    (which changes GDP-per-capita and therefore time-value-of-delay).
+    Returns list of dicts with scenario metadata + delta_npv.
+    """
+    SCENARIO_KEYS = [
+        ('min',           'Extreme Downside', '#ef4444'),
+        ('mean_minus_std','Downside Risk',    '#f97316'),
+        ('mean',          'Expected Outcome', '#a78bfa'),
+        ('mean_plus_std', 'Upside Risk',      '#22c55e'),
+        ('max',           'Extreme Upside',   '#10b981'),
+    ]
+    results = []
+    # Also build year-by-year projected population table for charting
+    pop_table = []  # list of {year, min, mean_minus, mean, mean_plus, max}
+    for yr in range(2011, 2051):
+        row = {}
+        for key, label, color in SCENARIO_KEYS:
+            row[key] = project_population(pop_2011, tier_data, 2011, yr, scenario=key)
+        pop_table.append({'year': yr, **row})
+
+    for key, label, color in SCENARIO_KEYS:
+        pop_2026 = project_population(pop_2011, tier_data, 2011, 2026, scenario=key)
+        sc_params = base_params.copy()
+        sc_params['population'] = pop_2026
+        eco = run_economic_analysis(total_volume, d_avg, sc_params, webster_results)
+        results.append({
+            'scenario': key,
+            'label':    label,
+            'color':    color,
+            'pop_2011': round(pop_2011),
+            'pop_2026': round(pop_2026),
+            'delta_npv': eco['delta_npv'],
+            'irr':       eco['irr'],
+            'payback':   eco['payback_years'],
+        })
+    return results, pop_table
+
 # --- GDP Growth Variability Schedule ---
 BASE_YEAR = 2025
 GDP_SCHED = [
@@ -23,6 +129,31 @@ GDP_SCHED = [
     (2051, 2055, 0.024),
     (2056, 2060, 0.023),
 ]
+
+# --- Traffic Growth Variability Schedule (replaces constant rate) ---
+# Source: period-specific projections; after 2050 growth tapers to 2.7%
+TRAFFIC_SCHED = [
+    (2026, 2030, 0.0767),
+    (2031, 2035, 0.0611),
+    (2036, 2040, 0.0437),
+    (2041, 2045, 0.0356),
+    (2046, 2050, 0.0270),
+]
+TRAFFIC_POST_2050 = 0.0270  # hold last rate constant beyond schedule
+
+def traffic_rate_for_year(calendar_year: int) -> float:
+    for y_start, y_end, rate in TRAFFIC_SCHED:
+        if y_start <= calendar_year <= y_end:
+            return rate
+    return TRAFFIC_POST_2050
+
+def precompute_traffic_factors(num_years: int, base_year: int, shift: float = 0.0) -> list:
+    """Cumulative traffic volume growth factors. f[0]=1.0, f[t]=Product(1+rate_i) for i=1..t"""
+    f = [1.0]
+    for t in range(1, num_years + 1):
+        rate = max(0.0, traffic_rate_for_year(base_year + t) + shift)
+        f.append(f[-1] * (1 + rate))
+    return f
 
 def gdp_rate_for_year(calendar_year: int) -> float:
     for y_start, y_end, rate in GDP_SCHED:
@@ -104,10 +235,11 @@ def run_economic_analysis(
 ):
     years = 30
     r_d = params["discount_rate"] / 100
-    r_g = params["traffic_growth"] / 100
     r_inf = params["inflation_rate"] / 100
     _gdp_shift = params.get("gdp_shift", 0.0)
-    _gdp_factors = precompute_gdp_factors(years, BASE_YEAR, _gdp_shift)
+    _traffic_shift = params.get("traffic_shift", 0.0)
+    _gdp_factors     = precompute_gdp_factors(years, BASE_YEAR, _gdp_shift)
+    _traffic_factors = precompute_traffic_factors(years, BASE_YEAR, _traffic_shift)
     
     gdppc_0 = (params["gdp_crores"] * 1e7) / params["population"]
     gdppc_sec_0 = gdppc_0 / (365 * 24 * 3600)
@@ -142,7 +274,7 @@ def run_economic_analysis(
     signal_capacity = total_s * 0.9
     
     for t in range(1, years + 1):
-        v_h_t = v_base * (1 + r_g)**t
+        v_h_t = v_base * _traffic_factors[t]
         v_h_t_capped = min(v_h_t, signal_capacity)
         v_year_t = v_h_t_capped * op_hours * 365
         
@@ -240,11 +372,14 @@ def analyze(data: dict):
         occupancy = float(data.get("occupancy", 1.8))
         
         gdp_crores = float(data.get("gdp", 200000))
-        population = float(data.get("population", 5e6))
+        # Only population_2011 is supplied by the user; derive 2026 working population
+        # via the mean-scenario tier projection so the economics reflect current reality.
+        population_2011 = float(data.get("population_2011", 5e6))
+        tier_data_early = get_tier(population_2011)
+        population = project_population(population_2011, tier_data_early, 2011, 2026, scenario='mean')
         fuel_cost = float(data.get("fuel_cost", 100))
         inflation_rate = float(data.get("inflation_rate", 6.0))
         discount_rate = float(data.get("discount_rate", 10.0))
-        traffic_growth = float(data.get("traffic_growth", 5.0))
         gdp_growth = float(data.get("gdp_growth", 6.0))
         
         signal_install_cost = float(data.get("signal_install_cost", 500000))
@@ -263,25 +398,37 @@ def analyze(data: dict):
         params = {
             "gdp_crores": gdp_crores, "population": population, "fuel_cost": fuel_cost,
             "inflation_rate": inflation_rate, "discount_rate": discount_rate,
-            "traffic_growth": traffic_growth, "gdp_growth": gdp_growth, "occupancy": occupancy,
+            "gdp_growth": gdp_growth, "occupancy": occupancy,
             "signal_install_cost": signal_install_cost, "grade_sep_construction_cost_crores": grade_sep_construction_cost_crores,
             "signal_maint_annual": signal_maint_annual, "grade_sep_maint_annual": grade_sep_maint_annual,
             "fuel_consumption_idle": fuel_consumption_idle, "voc_per_km": voc_per_km, "carbon_cost_kg": carbon_cost_kg
         }
         
         economic = run_economic_analysis(total_volume, webster["avg_delay"], params, webster)
+
+        # --- Population Variability Scenarios ---
+        tier_data = get_tier(population_2011)
+        tier_label = (
+            "Tier 1 (>4M)" if population_2011 > 4_000_000 else
+            "Tier 2 (1M–4M)" if population_2011 >= 1_000_000 else
+            "Tier 3 (<1M)"
+        )
+        pop_scenarios, pop_table = compute_pop_variability_scenarios(
+            population_2011, tier_data, params,
+            total_volume, webster["avg_delay"], webster
+        )
         
         # Scenario Analysis
         pessimistic_params = params.copy()
-        pessimistic_params["traffic_growth"] = max(0, traffic_growth - 2)
-        pessimistic_params["gdp_shift"] = -0.02   # −2pp shift to all scheduled GDP rates
+        pessimistic_params["traffic_shift"] = -0.015  # −1.5pp shift to scheduled traffic rates
+        pessimistic_params["gdp_shift"]     = -0.020  # −2pp shift to scheduled GDP rates
         pessimistic_params["discount_rate"] = discount_rate + 2
         pessimistic_params["grade_sep_construction_cost_crores"] = grade_sep_construction_cost_crores * 1.2
         res_pes = run_economic_analysis(total_volume, webster["avg_delay"], pessimistic_params, webster)
-        
+
         optimistic_params = params.copy()
-        optimistic_params["traffic_growth"] = traffic_growth + 2
-        optimistic_params["gdp_shift"] = +0.02    # +2pp shift to all scheduled GDP rates
+        optimistic_params["traffic_shift"] = +0.015  # +1.5pp shift to scheduled traffic rates
+        optimistic_params["gdp_shift"]     = +0.020  # +2pp shift to scheduled GDP rates
         optimistic_params["discount_rate"] = max(1, discount_rate - 2)
         optimistic_params["grade_sep_construction_cost_crores"] = grade_sep_construction_cost_crores * 0.8
         res_opt = run_economic_analysis(total_volume, webster["avg_delay"], optimistic_params, webster)
@@ -295,27 +442,37 @@ def analyze(data: dict):
         # Sensitivity Analysis (Tornado)
         sensitivities = []
         vars_to_test = [
-            ("Volume", "total_volume", total_volume),
-            ("GDP Growth", "gdp_growth", gdp_growth),
-            ("Discount Rate", "discount_rate", discount_rate),
-            ("Fuel Cost", "fuel_cost", fuel_cost),
-            ("Const. Cost", "grade_sep_construction_cost_crores", grade_sep_construction_cost_crores),
-            ("Traffic Growth", "traffic_growth", traffic_growth)
+            ("Volume",       "total_volume",                       total_volume),
+            ("GDP Growth",   "gdp_growth",                         gdp_growth),
+            ("Discount Rate","discount_rate",                      discount_rate),
+            ("Fuel Cost",    "fuel_cost",                          fuel_cost),
+            ("Const. Cost",  "grade_sep_construction_cost_crores", grade_sep_construction_cost_crores),
+            ("Traffic Shift","traffic_shift",                      0.0),
         ]
         
         for ui_name, var_name, var_val in vars_to_test:
             new_params_low = params.copy()
             new_v_low = total_volume
-            if var_name == "total_volume": new_v_low *= 0.8
-            elif var_name == "gdp_growth": new_params_low["gdp_shift"] = -0.02
-            else: new_params_low[var_name] *= 0.8
+            if var_name == "total_volume":
+                new_v_low *= 0.8
+            elif var_name == "gdp_growth":
+                new_params_low["gdp_shift"] = -0.02
+            elif var_name == "traffic_shift":
+                new_params_low["traffic_shift"] = -0.015
+            else:
+                new_params_low[var_name] = new_params_low.get(var_name, var_val) * 0.8
             res_low = run_economic_analysis(new_v_low, webster["avg_delay"], new_params_low, webster)
-            
+
             new_params_high = params.copy()
             new_v_high = total_volume
-            if var_name == "total_volume": new_v_high *= 1.2
-            elif var_name == "gdp_growth": new_params_high["gdp_shift"] = +0.02
-            else: new_params_high[var_name] *= 1.2
+            if var_name == "total_volume":
+                new_v_high *= 1.2
+            elif var_name == "gdp_growth":
+                new_params_high["gdp_shift"] = +0.02
+            elif var_name == "traffic_shift":
+                new_params_high["traffic_shift"] = +0.015
+            else:
+                new_params_high[var_name] = new_params_high.get(var_name, var_val) * 1.2
             res_high = run_economic_analysis(new_v_high, webster["avg_delay"], new_params_high, webster)
             
             sensitivities.append({
@@ -419,7 +576,13 @@ def analyze(data: dict):
                 "reason": reason,
                 "status": status
             },
-            "charts": chart_data
+            "charts": chart_data,
+            "variability": {
+                "tier": tier_label,
+                "pop_2011": round(population_2011),
+                "scenarios": pop_scenarios,
+                "pop_projection_table": pop_table,
+            },
         }
     except Exception as e:
         import traceback
