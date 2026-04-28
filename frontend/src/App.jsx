@@ -204,10 +204,11 @@ const TABS = [
   { id: 'signal', label: 'SIGNAL', icon: '1.' },
   { id: 'cashflow', label: 'CASH FLOWS', icon: '2.' },
   { id: 'npv', label: 'NPV', icon: '3.' },
-  { id: 'scenario', label: 'SCENARIOS', icon: '4.' },
-  { id: 'risk', label: 'SENSITIVITY & IRR', icon: '5.' },
-  { id: 'payback', label: 'PAYBACK', icon: '6.' },
-  { id: 'variability', label: 'VARIABILITY-GDP', icon: '7.' },
+  // { id: 'scenario',    label: 'SCENARIOS',       icon: '4.' },  // hidden — uncomment to enable
+  { id: 'risk', label: 'SENSITIVITY & IRR', icon: '4.' },
+  { id: 'payback', label: 'PAYBACK', icon: '5.' },
+  // { id: 'variability', label: 'VARIABILITY-GDP', icon: '7.' },  // hidden — uncomment to enable
+  { id: 'popvar', label: 'VARIABILITY', icon: '6.' },
 ];
 
 /* ─── GDP Variability Schedule (frontend mirror) ────────────────────────────── */
@@ -240,12 +241,12 @@ export default function App() {
   const [totalVol, setTotalVol] = useState(5000);
   const [occupancy, setOccupancy] = useState(1.8);
   const [gdp, setGdp] = useState(200000);
-  const [population, setPopulation] = useState(5000000);
+  // population is derived server-side from pop2011 via mean-scenario tier projection
+  const [pop2011, setPop2011] = useState(5000000);
   const [fuelCost, setFuelCost] = useState(100);
   const [inflation, setInflation] = useState(6.0);
   const [discount, setDiscount] = useState(10.0);
-  const [trafGrowth, setTrafGrowth] = useState(5.0);
-  // gdpGrowth removed — backend uses the variability schedule (see Tab 7)
+  // Traffic growth is now handled via the backend TRAFFIC_SCHED schedule, not a user input.
   const [idleFuel, setIdleFuel] = useState(0.7);
   const [voc, setVoc] = useState(3.0);
   const [carbon, setCarbon] = useState(1.5);
@@ -284,9 +285,10 @@ export default function App() {
       const { data } = await axios.post('https://traffic-dashboard-pqlh.onrender.com/analyze', {
         num_phases: numPhases,
         phases: phaseData.map(p => ({ critical_volume: p.criticalVolume, lanes: p.lanes })),
-        total_volume: totalVol, occupancy, gdp, population,
+        total_volume: totalVol, occupancy, gdp,
+        population_2011: pop2011,
         fuel_cost: fuelCost, inflation_rate: inflation, discount_rate: discount,
-        traffic_growth: trafGrowth,
+        // traffic_growth removed — backend uses TRAFFIC_SCHED schedule
         fuel_consumption_idle: idleFuel, voc_per_km: voc, carbon_cost: carbon,
         signal_install_cost: sigInstall, signal_maint_annual: sigMaint, construction_cost: buildCost,
         grade_sep_maint_annual: gradeMaint,
@@ -482,7 +484,7 @@ export default function App() {
                 </select>
               </div>
               <FieldGroup label="Occupancy" value={occupancy} onChange={setOccupancy} step="0.1" />
-              <FieldGroup label="Traffic Growth %" value={trafGrowth} onChange={setTrafGrowth} step="0.1" />
+
             </div>
 
             {/* Phase table */}
@@ -508,7 +510,7 @@ export default function App() {
             <GroupHead>💰 Economic Parameters</GroupHead>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <FieldGroup label="City GDP (₹ Cr)" value={gdp} onChange={setGdp} full />
-              <FieldGroup label="Population" value={population} onChange={setPopulation} />
+              <FieldGroup label="Population (2011 Census)" value={pop2011} onChange={setPop2011} full />
               <FieldGroup label="Discount Rate %" value={discount} onChange={setDiscount} step="0.1" />
 
               <FieldGroup label="Inflation %" value={inflation} onChange={setInflation} step="0.1" />
@@ -831,7 +833,7 @@ export default function App() {
                             {
                               name: 'PESSIMISTIC', val: chrt.scenarios.pessimistic, color: T.red,
                               icon: '↘', desc: 'Worst-case macro conditions',
-                              deltas: ['Traffic −2%', 'GDP −2%', 'DR +2%', 'Cost +20%'],
+                              deltas: ['Traffic −1.5pp', 'GDP −2pp', 'DR +2%', 'Cost +20%'],
                             },
                             {
                               name: 'BASE CASE', val: chrt.scenarios.base, color: T.violet,
@@ -841,7 +843,7 @@ export default function App() {
                             {
                               name: 'OPTIMISTIC', val: chrt.scenarios.optimistic, color: T.green,
                               icon: '↗', desc: 'Best-case macro conditions',
-                              deltas: ['Traffic +2%', 'GDP +2%', 'DR −2%', 'Cost −20%'],
+                              deltas: ['Traffic +1.5pp', 'GDP +2pp', 'DR −2%', 'Cost −20%'],
                             },
                           ].map((s, i) => (
                             <Card key={i} glow={s.active ? 'violet' : undefined}
@@ -1210,6 +1212,138 @@ export default function App() {
                       </div>
                     )}
 
+                    {/* ── TAB 8: POPULATION VARIABILITY ─────────────────────── */}
+                    {tab === 'popvar' && (() => {
+                      const vari = result.variability;
+                      if (!vari) return <div style={{ color: T.textMuted, padding: '40px', textAlign: 'center' }}>No variability data available.</div>;
+                      const SCEN_COLORS = ['#ef4444', '#f97316', '#a78bfa', '#22c55e', '#10b981'];
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+
+                          {/* Header + Tier badge */}
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                            <div>
+                              <SectionLabel num="8">Population Variability Scenarios</SectionLabel>
+                              <p style={{ fontSize: '13px', color: T.textSoft, maxWidth: '700px', lineHeight: 1.7 }}>
+                                Using <strong style={{ color: T.text }}>{vari.tier}</strong> growth-rate schedule.
+                                2011 census population <strong style={{ color: T.violet }}>{vari.pop_2011.toLocaleString()}</strong> is
+                                projected to 2026 under 5 distinct rate trajectories (Min, Mean−σ, Mean, Mean+σ, Max).
+                                Each projected 2026 population drives a separate 30-year NPV computation.
+                              </p>
+                            </div>
+                            <Tag color={T.cyan}>{vari.tier}</Tag>
+                          </div>
+
+                          {/* Population projection chart */}
+                          <ChartShell
+                            title="Population Projection 2011 → 2050 (5 Scenarios)"
+                            sub="Fan chart showing how city population evolves under each growth-rate path. All five converge from a single 2011 anchor."
+                          >
+                            <ResponsiveContainer width="100%" height={320}>
+                              <AreaChart
+                                data={vari.pop_projection_table.map(r => ({
+                                  year: r.year,
+                                  min: r.min / 1e6,
+                                  mean_minus: r.mean_minus_std / 1e6,
+                                  mean: r.mean / 1e6,
+                                  mean_plus: r.mean_plus_std / 1e6,
+                                  max: r.max / 1e6,
+                                }))}
+                                margin={{ top: 8, right: 12, left: -8, bottom: 0 }}
+                              >
+                                <defs>
+                                  <linearGradient id="gMax" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
+                                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                                  </linearGradient>
+                                  <linearGradient id="gMin" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="#ef4444" stopOpacity={0.15} />
+                                    <stop offset="100%" stopColor="#ef4444" stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                                <XAxis dataKey="year" {...axX} />
+                                <YAxis {...axY(v => `${v.toFixed(1)}M`)} />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '16px', color: T.textSoft }} iconType="line" iconSize={12} />
+                                <Area type="monotone" dataKey="max" name="Extreme Upside" stroke="#10b981" strokeWidth={1.5} fill="url(#gMax)" dot={false} strokeDasharray="4 2" />
+                                <Area type="monotone" dataKey="mean_plus" name="Upside Risk" stroke="#22c55e" strokeWidth={1.5} fill="none" dot={false} />
+                                <Area type="monotone" dataKey="mean" name="Expected Outcome" stroke="#a78bfa" strokeWidth={2.5} fill="none" dot={false} />
+                                <Area type="monotone" dataKey="mean_minus" name="Downside Risk" stroke="#f97316" strokeWidth={1.5} fill="none" dot={false} />
+                                <Area type="monotone" dataKey="min" name="Extreme Downside" stroke="#ef4444" strokeWidth={1.5} fill="url(#gMin)" dot={false} strokeDasharray="4 2" />
+                                <ReferenceLine x={2026} stroke="rgba(255,255,255,0.4)" strokeDasharray="4 2"
+                                  label={{ value: '2026 (Base)', position: 'top', fill: T.textMuted, fontSize: 10 }} />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </ChartShell>
+
+                          {/* 5 NPV Scenario cards */}
+                          <SectionLabel num="8B">Per-Scenario NPV Decision Outcomes</SectionLabel>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                            {vari.scenarios.map((sc, i) => (
+                              <Card key={i} style={{
+                                padding: '24px',
+                                borderColor: `${sc.color}40`,
+                                boxShadow: `0 0 28px -8px ${sc.color}20`,
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+                                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: sc.color, boxShadow: `0 0 8px ${sc.color}` }} />
+                                  <div style={{ fontSize: '10px', fontWeight: 800, color: sc.color === '#a78bfa' ? '#fff' : T.textSoft, letterSpacing: '1.5px', textTransform: 'uppercase' }}>
+                                    {sc.label}
+                                  </div>
+                                </div>
+
+                                {/* Population line */}
+                                <div style={{ marginBottom: '16px', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: `1px solid ${T.border}` }}>
+                                  <div style={{ fontSize: '9px', fontWeight: 700, color: T.textMuted, letterSpacing: '1px', marginBottom: '4px' }}>2026 PROJECTED POP.</div>
+                                  <div style={{ fontFamily: T.mono, fontSize: '14px', fontWeight: 700, color: T.textSoft }}>
+                                    {(sc.pop_2026 / 1e6).toFixed(3)} M
+                                  </div>
+                                </div>
+
+                                {/* NPV */}
+                                <div style={{ fontFamily: T.mono, fontSize: '28px', fontWeight: 900, color: sc.delta_npv > 0 ? T.green : T.red, letterSpacing: '-0.5px', marginBottom: '8px' }}>
+                                  {fmtCr(sc.delta_npv)}
+                                </div>
+                                <div style={{ fontSize: '10px', color: T.textMuted, marginBottom: '12px' }}>Δ NPV (Grade Sep − Signal)</div>
+
+                                {/* IRR & payback mini row */}
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                  {sc.irr != null && (
+                                    <div style={{ padding: '4px 8px', borderRadius: '5px', background: `${sc.color}15`, border: `1px solid ${sc.color}30`, fontSize: '11px', fontWeight: 700, color: sc.color, fontFamily: T.mono }}>
+                                      IRR {sc.irr.toFixed(1)}%
+                                    </div>
+                                  )}
+                                  {sc.payback != null && (
+                                    <div style={{ padding: '4px 8px', borderRadius: '5px', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', fontSize: '11px', fontWeight: 700, color: T.amber, fontFamily: T.mono }}>
+                                      Yr {sc.payback}
+                                    </div>
+                                  )}
+                                </div>
+                              </Card>
+                            ))}
+                          </div>
+
+                          {/* NPV comparison bar */}
+                          <Card style={{ padding: '28px' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 700, color: T.textMuted, letterSpacing: '1px', marginBottom: '20px' }}>NPV RANGE ACROSS ALL 5 POPULATION SCENARIOS</div>
+                            {vari.scenarios.map((sc, i) => {
+                              const maxAbs = Math.max(...vari.scenarios.map(s => Math.abs(s.delta_npv)), 1);
+                              return (
+                                <div key={i} style={{ marginBottom: i < vari.scenarios.length - 1 ? '14px' : 0 }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                    <span style={{ fontSize: '11px', color: T.textSoft, fontWeight: 600 }}>{sc.label}</span>
+                                    <span style={{ fontFamily: T.mono, fontSize: '11px', fontWeight: 700, color: sc.color }}>{fmtCr(sc.delta_npv)}</span>
+                                  </div>
+                                  <ProgressBar pct={(Math.abs(sc.delta_npv) / maxAbs) * 100} color={sc.color} h={7} />
+                                </div>
+                              );
+                            })}
+                          </Card>
+
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
