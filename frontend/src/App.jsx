@@ -953,7 +953,7 @@ export default function App() {
                         <SectionLabel num="7">Internal Rate of Return vs Discount Rate</SectionLabel>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                           <MetricCard icon="📊" label="Project IRR" value={fmt2(eco.irr)} unit="%" color={eco.irr > discount ? T.green : T.red}
-                            sub={eco.irr > discount ? `+${(eco.irr - discount).toFixed(2)}pp above Discount Rate` : `${(discount - eco.irr).toFixed(2)}pp below Discount Rate`} />
+                            sub={eco.irr > discount ? `+${(eco.irr - discount).toFixed(2)}% above Discount Rate` : `${(discount - eco.irr).toFixed(2)}% below Discount Rate`} />
                           <MetricCard icon="💸" label="Discount Rate" value={discount} unit="%" color={T.cyan} />
                           <MetricCard icon="💰" label="NPV" value={fmtCr(eco.delta_npv)} color={eco.delta_npv > 0 ? T.green : T.red} />
                         </div>
