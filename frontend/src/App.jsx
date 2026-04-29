@@ -705,7 +705,7 @@ export default function App() {
                     backdropFilter: 'blur(20px)', scrollbarWidth: 'none', paddingLeft: '32px', paddingRight: '32px',
                   }}>
                     <KpiCell label="Decision" value={dec.choice} color={hColor} />
-                    <KpiCell label="NPV" value={fmtCr(eco.delta_npv)} color={eco.delta_npv > 0 ? T.green : T.red} />
+                    <KpiCell label="EXPECTED NPV" value={fmtCr(eco.delta_npv)} color={eco.delta_npv > 0 ? T.green : T.red} />
                     <KpiCell label="IRR" value={`${fmt2(eco.irr)}%`} color={eco.irr > discount ? T.green : T.red} />
                     <KpiCell label="Payback" value={eco.payback ? `Yr ${eco.payback}` : 'N/A'} color={T.amber} />
                     <KpiCell label="Saturation" value={fmt2(web.sum_flow_ratios)} color={web.is_saturated ? T.red : T.green} />
@@ -811,10 +811,10 @@ export default function App() {
                             <h2 style={{ fontSize: '56px', fontWeight: 900, color: T.text, letterSpacing: '-2px', lineHeight: 1, marginBottom: '16px' }}>{dec.choice}</h2>
                             <Tag color={hColor}>{dec.status}</Tag>
                             <p style={{ marginTop: '20px', fontSize: '14px', color: T.textSoft, lineHeight: 1.9, maxWidth: '760px' }}>
-                              Based on 30-year lifecycle analysis at <strong style={{ color: T.text }}>{discount}% Discount Rate</strong>:&nbsp;
+                              Based on Expected Incremental NPV (weighted across 15 Variability Scenarios) at <strong style={{ color: T.text }}>{discount}% Discount Rate</strong>:&nbsp;
                               {eco.delta_npv > 0
-                                ? <>Grade Separation delivers an NPV advantage of <strong style={{ color: T.green }}>{fmtCr(eco.delta_npv)}</strong>. IRR = <strong style={{ color: T.green }}>{fmt2(eco.irr)}%</strong>, clearing the hurdle rate. Payback in <strong style={{ color: T.text }}>{eco.payback ?? 'N/A'}</strong> years.</>
-                                : <>Signal preserves <strong style={{ color: T.amber }}>{fmtCr(Math.abs(eco.delta_npv))}</strong> of NPV: construction cost outweighs lifetime traffic gains.</>
+                                ? <>Grade Separation delivers an Expected NPV advantage of <strong style={{ color: T.green }}>{fmtCr(eco.delta_npv)}</strong>. IRR = <strong style={{ color: T.green }}>{fmt2(eco.irr)}%</strong>, clearing the hurdle rate. Payback in <strong style={{ color: T.text }}>{eco.payback ?? 'N/A'}</strong> years.</>
+                                : <>Signal preserves <strong style={{ color: T.amber }}>{fmtCr(Math.abs(eco.delta_npv))}</strong> of Expected NPV: construction cost outweighs lifetime traffic gains.</>
                               }
                             </p>
                             <div style={{ marginTop: '24px', padding: '16px 20px', background: 'rgba(0,0,0,0.3)', borderRadius: '10px', borderLeft: `3px solid ${T.violet}`, fontSize: '13px', lineHeight: 1.7, color: T.textSoft }}>
@@ -955,7 +955,7 @@ export default function App() {
                           <MetricCard icon="📊" label="Project IRR" value={fmt2(eco.irr)} unit="%" color={eco.irr > discount ? T.green : T.red}
                             sub={eco.irr > discount ? `+${(eco.irr - discount).toFixed(2)}% above Discount Rate` : `${(discount - eco.irr).toFixed(2)}% below Discount Rate`} />
                           <MetricCard icon="💸" label="Discount Rate" value={discount} unit="%" color={T.cyan} />
-                          <MetricCard icon="💰" label="NPV" value={fmtCr(eco.delta_npv)} color={eco.delta_npv > 0 ? T.green : T.red} />
+                          <MetricCard icon="💰" label="Expected NPV" value={fmtCr(eco.delta_npv)} color={eco.delta_npv > 0 ? T.green : T.red} />
                         </div>
 
                         <Card style={{ padding: '24px 28px' }}>
