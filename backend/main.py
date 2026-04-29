@@ -79,43 +79,177 @@ def compute_pop_variability_scenarios(
     webster_results: Dict,
 ) -> List[Dict]:
     """
-    For each of the 5 scenarios, project pop 2011→2026 using that scenario's
-    per-year rates, then run the full 30-year NPV analysis with that population
-    (which changes GDP-per-capita and therefore time-value-of-delay).
-    Returns list of dicts with scenario metadata + delta_npv.
+    Population variability across 5 scenarios.
+    2011 → 2026 : ALWAYS uses mean tier rate (single convergent path).
+    2026 → end  : each scenario fans out using its own per-year tier rates.
     """
     SCENARIO_KEYS = [
-        ('min',           'Extreme Downside', '#ef4444'),
-        ('mean_minus_std','Downside Risk',    '#f97316'),
-        ('mean',          'Expected Outcome', '#a78bfa'),
-        ('mean_plus_std', 'Upside Risk',      '#22c55e'),
-        ('max',           'Extreme Upside',   '#10b981'),
+        ('min',            'Extreme Downside', '#ef4444'),
+        ('mean_minus_std', 'Downside Risk',    '#f97316'),
+        ('mean',           'Expected Outcome', '#a78bfa'),
+        ('mean_plus_std',  'Upside Risk',      '#22c55e'),
+        ('max',            'Extreme Upside',   '#10b981'),
     ]
-    results = []
-    # Also build year-by-year projected population table for charting
-    pop_table = []  # list of {year, min, mean_minus, mean, mean_plus, max}
-    for yr in range(2011, 2051):
-        row = {}
-        for key, label, color in SCENARIO_KEYS:
-            row[key] = project_population(pop_2011, tier_data, 2011, yr, scenario=key)
-        pop_table.append({'year': yr, **row})
+    # 2026 baseline — all scenarios share this starting population
+    pop_2026_base = project_population(pop_2011, tier_data, 2011, 2026, scenario='mean')
 
+    # Build projection table: 2011-2026 identical (mean), 2026-2056 fans out
+    pop_table = []
+    for yr in range(2011, 2057):
+        row = {'year': yr}
+        for key, label, color in SCENARIO_KEYS:
+            if yr <= 2026:
+                row[key] = project_population(pop_2011, tier_data, 2011, yr, scenario='mean')
+            else:
+                row[key] = project_population(pop_2026_base, tier_data, 2026, yr, scenario=key)
+        pop_table.append(row)
+
+    results = []
     for key, label, color in SCENARIO_KEYS:
-        pop_2026 = project_population(pop_2011, tier_data, 2011, 2026, scenario=key)
+        pop_factors = compute_pop_factors_from_2026(key, tier_data, n_years=30)
         sc_params = base_params.copy()
-        sc_params['population'] = pop_2026
-        eco = run_economic_analysis(total_volume, d_avg, sc_params, webster_results)
+        sc_params['population'] = pop_2026_base
+        eco = run_economic_analysis(total_volume, d_avg, sc_params, webster_results,
+                                    pop_factors=pop_factors)
         results.append({
-            'scenario': key,
-            'label':    label,
-            'color':    color,
-            'pop_2011': round(pop_2011),
-            'pop_2026': round(pop_2026),
+            'scenario':  key,
+            'label':     label,
+            'color':     color,
+            'pop_2011':  round(pop_2011),
+            'pop_2026':  round(pop_2026_base),
             'delta_npv': eco['delta_npv'],
             'irr':       eco['irr'],
             'payback':   eco['payback_years'],
         })
     return results, pop_table
+
+
+# ── Fuel scenario constants ────────────────────────────────────────────────────
+FUEL_BASE_2025 = 105.0           # ₹ per litre at 2025
+FUEL_SCENARIOS = [
+    {'id': 'green', 'label': 'Green Scenario', 'rate': 0.0300,    'prob': 0.16, 'color': '#10b981'},
+    {'id': 'base',  'label': 'Base Case',      'rate': 0.051387,  'prob': 0.28, 'color': '#a78bfa'},
+    {'id': 'high',  'label': 'High Growth',    'rate': 0.0600,    'prob': 0.56, 'color': '#f43f5e'},
+]
+
+# Population scenario probabilities
+POP_PROBS = {
+    'min':            0.09,
+    'mean_minus_std': 0.16,
+    'mean':           0.50,
+    'mean_plus_std':  0.16,
+    'max':            0.09,
+}
+POP_SCENARIO_KEYS = ['min', 'mean_minus_std', 'mean', 'mean_plus_std', 'max']
+
+
+def compute_pop_factors_from_2026(scenario_key: str, tier_data: Dict, n_years: int = 30) -> list:
+    """Cumulative population growth factors from 2026 baseline.
+    f[0]=1.0, f[t] = product of (1+rate) for calendar years 2027 .. 2026+t."""
+    f = [1.0]
+    for t in range(1, n_years + 1):
+        cal_year = 2026 + t
+        row = tier_data.get(cal_year, tier_data[max(tier_data.keys())])
+        if scenario_key == 'mean':
+            rate = row['mean']
+        elif scenario_key == 'mean_minus_std':
+            rate = row['mean'] - row['stddev']
+        elif scenario_key == 'mean_plus_std':
+            rate = row['mean'] + row['stddev']
+        elif scenario_key == 'min':
+            rate = row['min']
+        elif scenario_key == 'max':
+            rate = row['max']
+        else:
+            rate = row['mean']
+        f.append(f[-1] * (1 + rate))
+    return f
+
+
+def compute_combined_variability(
+    pop_2011: float,
+    tier_data: Dict,
+    base_params: Dict,
+    total_volume: float,
+    d_avg: float,
+    webster_results: Dict,
+) -> Dict:
+    """Run all 15 (pop × fuel) scenario combinations.
+    Returns nested structure keyed by fuel scenario, each containing 5 pop rows.
+    """
+    POP_META = [
+        ('min',            'Extreme Downside', '#ef4444'),
+        ('mean_minus_std', 'Downside Risk',    '#f97316'),
+        ('mean',           'Expected Outcome', '#a78bfa'),
+        ('mean_plus_std',  'Upside Risk',      '#22c55e'),
+        ('max',            'Extreme Upside',   '#10b981'),
+    ]
+    pop_2026_base = project_population(pop_2011, tier_data, 2011, 2026, scenario='mean')
+
+    # Pre-compute pop growth factors once per pop scenario
+    pop_factors_map = {
+        key: compute_pop_factors_from_2026(key, tier_data, n_years=30)
+        for key, *_ in POP_META
+    }
+
+    fuel_groups = []
+    overall_expected_npv = 0.0
+
+    for fuel_sc in FUEL_SCENARIOS:
+        pop_rows = []
+        fuel_expected_npv = 0.0
+        for pop_key, pop_label, pop_color in POP_META:
+            pop_prob   = POP_PROBS[pop_key]
+            joint_prob = round(pop_prob * fuel_sc['prob'], 6)
+
+            sc_params = base_params.copy()
+            sc_params['population'] = pop_2026_base
+            eco = run_economic_analysis(
+                total_volume, d_avg, sc_params, webster_results,
+                fuel_override={'base': FUEL_BASE_2025, 'rate': fuel_sc['rate']},
+                pop_factors=pop_factors_map[pop_key],
+            )
+            weighted_npv = joint_prob * eco['delta_npv']
+            fuel_expected_npv  += pop_prob * eco['delta_npv']  # Conditional expectation given this fuel scenario
+            overall_expected_npv += weighted_npv
+
+            pop_rows.append({
+                'pop_scenario': pop_key,
+                'pop_label':    pop_label,
+                'pop_color':    pop_color,
+                'pop_prob':     pop_prob,
+                'fuel_prob':    fuel_sc['prob'],
+                'joint_prob':   joint_prob,
+                'delta_npv':    eco['delta_npv'],
+                'irr':          eco['irr'],
+                'payback':      eco['payback_years'],
+            })
+
+        fuel_groups.append({
+            'fuel_id':       fuel_sc['id'],
+            'fuel_label':    fuel_sc['label'],
+            'fuel_color':    fuel_sc['color'],
+            'fuel_prob':     fuel_sc['prob'],
+            'fuel_rate_pct': round(fuel_sc['rate'] * 100, 4),
+            'expected_npv':  fuel_expected_npv,
+            'pop_rows':      pop_rows,
+        })
+
+    # Generate fuel price projection table for charting (2025-2056)
+    fuel_table = []
+    for yr in range(2025, 2057):
+        t = yr - 2025
+        row = {'year': yr}
+        for sc in FUEL_SCENARIOS:
+            row[sc['id']] = FUEL_BASE_2025 * (1 + sc['rate'])**t
+        fuel_table.append(row)
+
+    return {
+        'pop_2026_base':       round(pop_2026_base),
+        'fuel_groups':         fuel_groups,
+        'overall_expected_npv': overall_expected_npv,
+        'fuel_projection_table': fuel_table,
+    }
 
 # --- GDP Growth Variability Schedule ---
 BASE_YEAR = 2025
@@ -231,7 +365,9 @@ def run_economic_analysis(
     v_base: float,
     d_avg: float,
     params: Dict,
-    webster_results: Dict
+    webster_results: Dict,
+    fuel_override: Optional[Dict] = None,   # {'base': 105.0, 'rate': 0.03} overrides f_0 & growth
+    pop_factors: Optional[List[float]] = None,  # cumulative pop factors [1.0, ...] from 2026
 ):
     years = 30
     r_d = params["discount_rate"] / 100
@@ -246,7 +382,13 @@ def run_economic_analysis(
     
     op_hours = 16
     
-    f_0 = params["fuel_cost"]
+    # Fuel: use scenario override if provided, else fall back to user-entered cost + inflation
+    if fuel_override:
+        f_0        = fuel_override['base']
+        fuel_rate  = fuel_override['rate']
+    else:
+        f_0        = params["fuel_cost"]
+        fuel_rate  = params["inflation_rate"] / 100   # reuse inflation as fuel growth proxy
     fc = params["fuel_consumption_idle"]
     voc = params["voc_per_km"]
     carbon_price = params["carbon_cost_kg"]
@@ -278,8 +420,10 @@ def run_economic_analysis(
         v_h_t_capped = min(v_h_t, signal_capacity)
         v_year_t = v_h_t_capped * op_hours * 365
         
-        gdppc_sec_t = gdppc_sec_0 * _gdp_factors[t]
-        f_t = f_0 * (1 + r_inf)**t
+        # GDP per capita: adjusted downward when population grows faster than GDP
+        pop_adj = pop_factors[t] if pop_factors else 1.0
+        gdppc_sec_t = gdppc_sec_0 * _gdp_factors[t] / pop_adj
+        f_t = f_0 * (1 + fuel_rate)**t
         
         tvl_t = v_year_t * d_avg * params["occupancy"] * gdppc_sec_t
         fuel_per_stop = (fc / 3600) * d_avg * 0.85
@@ -417,28 +561,12 @@ def analyze(data: dict):
             population_2011, tier_data, params,
             total_volume, webster["avg_delay"], webster
         )
+        combined_variability = compute_combined_variability(
+            population_2011, tier_data, params,
+            total_volume, webster["avg_delay"], webster
+        )
         
-        # Scenario Analysis
-        pessimistic_params = params.copy()
-        pessimistic_params["traffic_shift"] = -0.015  # −1.5pp shift to scheduled traffic rates
-        pessimistic_params["gdp_shift"]     = -0.020  # −2pp shift to scheduled GDP rates
-        pessimistic_params["discount_rate"] = discount_rate + 2
-        pessimistic_params["grade_sep_construction_cost_crores"] = grade_sep_construction_cost_crores * 1.2
-        res_pes = run_economic_analysis(total_volume, webster["avg_delay"], pessimistic_params, webster)
 
-        optimistic_params = params.copy()
-        optimistic_params["traffic_shift"] = +0.015  # +1.5pp shift to scheduled traffic rates
-        optimistic_params["gdp_shift"]     = +0.020  # +2pp shift to scheduled GDP rates
-        optimistic_params["discount_rate"] = max(1, discount_rate - 2)
-        optimistic_params["grade_sep_construction_cost_crores"] = grade_sep_construction_cost_crores * 0.8
-        res_opt = run_economic_analysis(total_volume, webster["avg_delay"], optimistic_params, webster)
-        
-        scenarios = {
-            "pessimistic": res_pes["delta_npv"],
-            "base": economic["delta_npv"],
-            "optimistic": res_opt["delta_npv"],
-        }
-        
         # Sensitivity Analysis (Tornado)
         sensitivities = []
         vars_to_test = [
@@ -509,9 +637,9 @@ def analyze(data: dict):
         status = "Conditionally Recommended"
         if webster["is_saturated"]:
             status = "Mandatory"
-        elif economic["delta_npv"] > 0 and scenarios["pessimistic"] > 0:
+        elif economic["delta_npv"] > 0:
             status = "Robustly Recommended"
-        elif economic["delta_npv"] < 0 and scenarios["optimistic"] < 0:
+        elif economic["delta_npv"] < 0:
             status = "Strongly Disrecommended"
         # Payback statement addition per rules
         if economic["discounted_payback_years"] is not None and economic["discounted_payback_years"] > 20:
@@ -541,7 +669,6 @@ def analyze(data: dict):
             ],
             "sensitivities": sensitivities,
             "breakeven_cost": breakeven_c,
-            "scenarios": scenarios,
             "gdp_variability": [
                 {
                     "year": t,
@@ -549,15 +676,6 @@ def analyze(data: dict):
                     "rate": round(gdp_rate_for_year(BASE_YEAR + t) * 100, 1),
                 }
                 for t in range(0, 31)
-            ],
-            "spider_data": [
-                {
-                    "variable": s["variable"],
-                    "upside": round(abs(s["high_npv"] - economic["delta_npv"]) / max(max(s2["spread"] for s2 in sensitivities), 1) * 100, 1),
-                    "downside": round(abs(s["low_npv"] - economic["delta_npv"]) / max(max(s2["spread"] for s2 in sensitivities), 1) * 100, 1),
-                    "spread_pct": round(s["spread"] / max(max(s2["spread"] for s2 in sensitivities), 1) * 100, 1),
-                }
-                for s in sensitivities
             ]
         }
         return {
@@ -582,6 +700,7 @@ def analyze(data: dict):
                 "pop_2011": round(population_2011),
                 "scenarios": pop_scenarios,
                 "pop_projection_table": pop_table,
+                "combined": combined_variability,
             },
         }
     except Exception as e:
